@@ -32,6 +32,18 @@ const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
   "error",
 ]);
 
+const OFFICIAL_STATUS_LABEL: Record<ProviderTimeline["latest"]["type"], string> = {
+  openai: "OpenAI官方状态",
+  anthropic: "Claude官方状态",
+  gemini: "Gemini官方状态",
+};
+
+const OFFICIAL_STATUS_URL: Record<ProviderTimeline["latest"]["type"], string> = {
+  openai: "https://status.openai.com/",
+  anthropic: "https://status.claude.com/",
+  gemini: "https://aistudio.google.com/status",
+};
+
 function getTodayAvailability(items: TimelineItem[], isMaintenance: boolean) {
   if (isMaintenance) {
     return null;
@@ -91,6 +103,8 @@ export function ProviderCard({
   const officialStatusMeta = officialStatus
     ? OFFICIAL_STATUS_META[officialStatus.status]
     : null;
+  const officialStatusLabel = OFFICIAL_STATUS_LABEL[latest.type];
+  const officialStatusUrl = OFFICIAL_STATUS_URL[latest.type];
 
   return (
     <div className="group relative flex flex-col overflow-hidden rounded-2xl border border-border/40 bg-background/40 backdrop-blur-xl transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10 hover:border-primary/30 dark:hover:shadow-primary/5 hover:bg-background/60">
@@ -155,16 +169,7 @@ export function ProviderCard({
 
         <div className="space-y-3 border-t border-border/30 pt-4">
           <div className="flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <div className="text-xs font-medium text-muted-foreground">今日成功率</div>
-              <div className="mt-1 text-[11px] text-muted-foreground/70">
-                {todayAvailability
-                  ? todayAvailability.isDefault
-                    ? "今日默认值"
-                    : `${todayAvailability.successfulChecks}/${todayAvailability.totalChecks} 成功`
-                  : "维护中"}
-              </div>
-            </div>
+            <div className="min-w-0 text-xs font-medium text-muted-foreground">成功率</div>
             <div
               className={cn(
                 "font-mono text-sm font-bold",
@@ -176,7 +181,15 @@ export function ProviderCard({
           </div>
 
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground">官方状态</span>
+            <a
+              href={officialStatusUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground hover:underline"
+              title={`打开${officialStatusLabel}`}
+            >
+              {officialStatusLabel}
+            </a>
             {officialStatus && officialStatusMeta ? (
               <HoverCard
                 openDelay={isCoarsePointer ? 0 : 200}

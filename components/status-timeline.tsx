@@ -35,9 +35,28 @@ const formatRemainingTime = (ms: number) => {
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
 
+const SUCCESS_STATUSES = new Set(["operational", "degraded"]);
+const COUNTED_STATUSES = new Set([
+  "operational",
+  "degraded",
+  "failed",
+  "validation_failed",
+  "error",
+]);
+
 function getTodayItems(items: TimelineItem[]) {
   const todayKey = getStatusDayKey(new Date());
   return items.filter((item) => getStatusDayKey(item.checkedAt) === todayKey);
+}
+
+function getAvailabilityPercentage(items: TimelineItem[]) {
+  const countedItems = items.filter((item) => COUNTED_STATUSES.has(item.status));
+  if (countedItems.length === 0) {
+    return 100;
+  }
+
+  const successCount = countedItems.filter((item) => SUCCESS_STATUSES.has(item.status)).length;
+  return (successCount / countedItems.length) * 100;
 }
 
 export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: StatusTimelineProps) {
@@ -79,7 +98,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
   const hasTodayItems = todayItems.length > 0;
   const displayItems = hasTodayItems ? todayItems.slice(0, SEGMENT_LIMIT) : [];
   const segments = Array.from({ length: SEGMENT_LIMIT }, (_, index) => displayItems[index] ?? null);
-  const segmentCount = Math.min(displayItems.length, SEGMENT_LIMIT);
+  const availabilityPercentage = getAvailabilityPercentage(todayItems);
   const nextRefreshLabel =
     typeof nextRefreshInMs === "number" ? formatRemainingTime(nextRefreshInMs) : null;
 
@@ -88,13 +107,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       {/* Header / Legend */}
       <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span>
-            {hasTodayItems
-              ? segmentCount <= 1
-                ? "今日记录"
-                : `今日 ${segmentCount} 条`
-              : "今日默认 100%"}
-          </span>
+          <span>成功率 {availabilityPercentage.toFixed(2)}%</span>
         </div>
         <div className="flex items-center gap-2">
            {nextRefreshLabel ? (
