@@ -38,11 +38,6 @@ async function getSessionSecret(input?: {createIfMissing?: boolean}): Promise<st
     return envSecret;
   }
 
-  const supabaseFallback = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (supabaseFallback) {
-    return supabaseFallback;
-  }
-
   const bootstrapSecret = getBootstrapAdminSessionSecret();
   if (bootstrapSecret) {
     return bootstrapSecret;

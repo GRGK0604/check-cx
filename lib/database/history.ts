@@ -3,6 +3,7 @@
  */
 
 import "server-only";
+import {getPollingIntervalMs} from "@/lib/core/polling-config";
 import {getControlPlaneStorage} from "@/lib/storage/resolver";
 import type {RuntimeHistoryQueryOptions} from "@/lib/storage/types";
 import type {HistorySnapshotRow} from "@/lib/types/database";
@@ -13,6 +14,10 @@ import {logError} from "../utils";
  * 每个 Provider 最多保留的历史记录数
  */
 export const MAX_POINTS_PER_PROVIDER = 60;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DAILY_HISTORY_LIMIT_BUFFER = 12;
+const MAX_DAILY_POINTS_PER_PROVIDER = 2000;
 
 const DEFAULT_RETENTION_DAYS = 30;
 const MIN_RETENTION_DAYS = 7;
@@ -27,6 +32,20 @@ export const HISTORY_RETENTION_DAYS = (() => {
 })();
 
 export type HistoryQueryOptions = RuntimeHistoryQueryOptions;
+
+export function getDailyHistoryLimitPerConfig(
+  pollIntervalMs: number = getPollingIntervalMs()
+): number {
+  if (!Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
+    return MAX_POINTS_PER_PROVIDER;
+  }
+
+  const expectedPoints = Math.ceil(DAY_MS / pollIntervalMs) + DAILY_HISTORY_LIMIT_BUFFER;
+  return Math.min(
+    MAX_DAILY_POINTS_PER_PROVIDER,
+    Math.max(MAX_POINTS_PER_PROVIDER, expectedPoints)
+  );
+}
 
 /**
  * SnapshotStore 负责与数据库交互，提供统一的读/写/清理接口
@@ -64,7 +83,7 @@ class SnapshotStore {
       await storage.runtime.history.prune(HISTORY_RETENTION_DAYS);
     } catch (error) {
       logError("写入历史记录失败", error);
-      return;
+      throw error;
     }
   }
 

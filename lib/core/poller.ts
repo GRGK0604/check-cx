@@ -3,15 +3,13 @@
  * 在应用启动时自动初始化并持续运行
  */
 
-import {historySnapshotStore} from "../database/history";
 import {loadProviderConfigsFromDB} from "../database/config-loader";
-import {runProviderChecks} from "../providers";
 import {invalidateDashboardCache} from "./dashboard-data";
 import {clearPingCache} from "./global-state";
+import {runProviderChecksAndPersist} from "./health-snapshot-service";
 import {getCheckConcurrency, getPollingIntervalMs} from "./polling-config";
 import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
-import {notifyTelegramForCheckResults} from "@/lib/notifications/telegram";
 import type {CheckResult, HealthStatus} from "../types";
 import {PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS, PROVIDER_CHECK_MAX_ATTEMPTS} from "../providers";
 
@@ -213,15 +211,16 @@ async function tick() {
       return;
     }
 
-    const results = await runProviderChecks(configs, {signal: tickController.signal});
+    const results = await runProviderChecksAndPersist(
+      configs,
+      {signal: tickController.signal},
+      {
+        shouldPersist: () => isTickCurrent(tickRunId, tickController.signal),
+        shouldNotify: () => isTickCurrent(tickRunId, tickController.signal),
+      }
+    );
     if (!isTickCurrent(tickRunId, tickController.signal)) {
       console.warn("[check-cx] 已丢弃过期轮询结果，避免写入重复历史");
-      return;
-    }
-
-    await historySnapshotStore.append(results);
-    if (!isTickCurrent(tickRunId, tickController.signal)) {
-      console.warn("[check-cx] 旧轮询已在写入后过期，跳过后续缓存刷新");
       return;
     }
 
@@ -231,7 +230,6 @@ async function tick() {
       `[check-cx] 后台轮询完成：写入 ${results.length} 条检测结果，时间 ${new Date().toISOString()}`
     );
     logFailedResultsByGroup(results);
-    await notifyTelegramForCheckResults(results);
   } catch (error) {
     if (tickController.signal.aborted) {
       const message =
@@ -251,5 +249,3 @@ async function tick() {
     }
   }
 }
-
-ensureCheckPoller();

@@ -4,10 +4,10 @@ import {Radio, Zap} from "lucide-react";
 
 import {ProviderIcon} from "@/components/provider-icon";
 import {StatusTimeline} from "@/components/status-timeline";
-import {AvailabilityStats} from "@/components/availability-stats";
 import {Badge} from "@/components/ui/badge";
 import {HoverCard, HoverCardContent, HoverCardTrigger} from "@/components/ui/hover-card";
-import type {AvailabilityPeriod, AvailabilityStat, ProviderTimeline} from "@/lib/types";
+import type {HealthStatus, ProviderTimeline, TimelineItem} from "@/lib/types";
+import {getStatusDayKey} from "@/lib/core/calendar-day";
 import {OFFICIAL_STATUS_META, PROVIDER_LABEL, STATUS_META} from "@/lib/core/status";
 import {ClientTime} from "@/components/client-time";
 import {cn} from "@/lib/utils";
@@ -18,12 +18,50 @@ interface ProviderCardProps {
   isCoarsePointer: boolean;
   activeOfficialCardId: string | null;
   setActiveOfficialCardId: (id: string | null) => void;
-  availabilityStats?: AvailabilityStat[] | null;
-  selectedPeriod: AvailabilityPeriod;
 }
 
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
+
+const SUCCESS_STATUSES: ReadonlySet<HealthStatus> = new Set(["operational", "degraded"]);
+const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
+  "operational",
+  "degraded",
+  "failed",
+  "validation_failed",
+  "error",
+]);
+
+function getTodayAvailability(items: TimelineItem[], isMaintenance: boolean) {
+  if (isMaintenance) {
+    return null;
+  }
+
+  const todayKey = getStatusDayKey(new Date());
+  const todayItems = items.filter(
+    (item) => getStatusDayKey(item.checkedAt) === todayKey && COUNTED_STATUSES.has(item.status)
+  );
+  const totalChecks = todayItems.length;
+  const successfulChecks = todayItems.filter((item) => SUCCESS_STATUSES.has(item.status)).length;
+  const percentage = totalChecks > 0 ? (successfulChecks / totalChecks) * 100 : 100;
+
+  return {
+    totalChecks,
+    successfulChecks,
+    percentage,
+    isDefault: totalChecks === 0,
+  };
+}
+
+function getAvailabilityTone(percentage: number) {
+  if (percentage >= 99) {
+    return "text-emerald-500";
+  }
+  if (percentage >= 90) {
+    return "text-amber-500";
+  }
+  return "text-rose-500";
+}
 
 const CornerPlus = ({ className }: { className?: string }) => (
   <svg
@@ -44,12 +82,11 @@ export function ProviderCard({
   isCoarsePointer,
   activeOfficialCardId,
   setActiveOfficialCardId,
-  availabilityStats,
-  selectedPeriod,
 }: ProviderCardProps) {
   const { id, latest, items } = timeline;
   const preset = STATUS_META[latest.status];
   const isMaintenance = latest.status === "maintenance";
+  const todayAvailability = getTodayAvailability(items, isMaintenance);
   const officialStatus = latest.officialStatus;
   const officialStatusMeta = officialStatus
     ? OFFICIAL_STATUS_META[officialStatus.status]
@@ -71,8 +108,8 @@ export function ProviderCard({
               </div>
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="flex-1 truncate text-base font-bold leading-none tracking-tight text-foreground sm:text-lg">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="min-w-0 flex-1 break-words text-base font-bold leading-snug tracking-tight text-foreground sm:text-lg">
                   {latest.name}
                 </h3>
                 <Badge
@@ -117,6 +154,27 @@ export function ProviderCard({
         </div>
 
         <div className="space-y-3 border-t border-border/30 pt-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-muted-foreground">今日成功率</div>
+              <div className="mt-1 text-[11px] text-muted-foreground/70">
+                {todayAvailability
+                  ? todayAvailability.isDefault
+                    ? "今日默认值"
+                    : `${todayAvailability.successfulChecks}/${todayAvailability.totalChecks} 成功`
+                  : "维护中"}
+              </div>
+            </div>
+            <div
+              className={cn(
+                "font-mono text-sm font-bold",
+                todayAvailability ? getAvailabilityTone(todayAvailability.percentage) : "text-muted-foreground"
+              )}
+            >
+              {todayAvailability ? `${todayAvailability.percentage.toFixed(2)}%` : "—"}
+            </div>
+          </div>
+
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">官方状态</span>
             {officialStatus && officialStatusMeta ? (
@@ -183,8 +241,6 @@ export function ProviderCard({
               <span className="text-xs text-muted-foreground/40">—</span>
             )}
           </div>
-
-          <AvailabilityStats stats={availabilityStats} period={selectedPeriod} isMaintenance={isMaintenance} />
         </div>
       </div>
 

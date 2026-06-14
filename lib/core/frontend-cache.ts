@@ -224,7 +224,7 @@ function revalidateInBackground(
     return;
   }
 
-  const request = fetchFromNetwork(trendPeriod, etag, false, true)
+  const request = fetchFromNetwork(trendPeriod, etag, false, false)
     .then(({ data, etag: newEtag }) => {
       if (data) {
         setCache(trendPeriod, data, newEtag);

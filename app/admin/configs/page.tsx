@@ -40,13 +40,16 @@ function getSingleParam(value: string | string[] | undefined): string | null {
   return value ?? null;
 }
 
+const CONFIGS_BATCH_FORM_ID = "admin-configs-batch-form";
+
 export default async function AdminConfigsPage({
   searchParams,
   adminBasePath = "/admin",
 }: AdminConfigsPageProps) {
   const configsPath = getAdminPath(adminBasePath, "configs");
+  const loginPath = getAdminPath(adminBasePath, "login");
 
-  await requireAdminSession(getAdminPath(adminBasePath, "login"));
+  await requireAdminSession(loginPath);
   const [{configs, templates}, params] = await Promise.all([
     loadAdminConfigData(),
     searchParams,
@@ -70,6 +73,7 @@ export default async function AdminConfigsPage({
       >
         <form action={upsertConfigAction} className="space-y-4">
           <input type="hidden" name="returnTo" value={configsPath} />
+          <input type="hidden" name="loginReturnTo" value={loginPath} />
 
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <AdminField label="配置名称">
@@ -164,10 +168,14 @@ export default async function AdminConfigsPage({
             当前还没有任何检测配置。
           </div>
         ) : (
-          <form action={manageConfigsAction} className="space-y-4">
-            <input type="hidden" name="returnTo" value={configsPath} />
-
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="space-y-4">
+            <form
+              id={CONFIGS_BATCH_FORM_ID}
+              action={manageConfigsAction}
+              className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+            >
+              <input type="hidden" name="returnTo" value={configsPath} />
+              <input type="hidden" name="loginReturnTo" value={loginPath} />
               <div className="text-sm text-muted-foreground">
                 共 {configs.length} 条配置，最近更新优先显示。
               </div>
@@ -183,7 +191,7 @@ export default async function AdminConfigsPage({
                   执行批量操作
                 </Button>
               </div>
-            </div>
+            </form>
 
             <div className="rounded-[1.5rem] border border-border/50 bg-background/60">
               <Table>
@@ -204,6 +212,7 @@ export default async function AdminConfigsPage({
                       <TableCell className="w-12">
                         <input
                           type="checkbox"
+                          form={CONFIGS_BATCH_FORM_ID}
                           name="selected_ids"
                           value={config.id}
                           className="h-4 w-4 rounded border-border/60"
@@ -246,15 +255,17 @@ export default async function AdminConfigsPage({
                           >
                             编辑
                           </Link>
-                          <button
-                            type="submit"
-                            name="id"
-                            value={config.id}
-                            formAction={deleteConfigAction}
-                            className="inline-flex items-center justify-center rounded-full border border-rose-500/20 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
-                          >
-                            删除
-                          </button>
+                          <form action={deleteConfigAction} className="inline-flex">
+                            <input type="hidden" name="id" value={config.id} />
+                            <input type="hidden" name="returnTo" value={configsPath} />
+                            <input type="hidden" name="loginReturnTo" value={loginPath} />
+                            <button
+                              type="submit"
+                              className="inline-flex items-center justify-center rounded-full border border-rose-500/20 px-3 py-2 text-sm text-rose-700 transition hover:bg-rose-500/10 dark:text-rose-300"
+                            >
+                              删除
+                            </button>
+                          </form>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -262,7 +273,7 @@ export default async function AdminConfigsPage({
                 </TableBody>
               </Table>
             </div>
-          </form>
+          </div>
         )}
       </AdminPanel>
 
@@ -274,6 +285,7 @@ export default async function AdminConfigsPage({
           <form action={upsertConfigAction} className="space-y-4">
             <input type="hidden" name="id" value={editingConfig.id} />
             <input type="hidden" name="returnTo" value={configsPath} />
+            <input type="hidden" name="loginReturnTo" value={loginPath} />
 
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <AdminField label="配置名称">

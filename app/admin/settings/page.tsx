@@ -32,8 +32,9 @@ export default async function AdminSettingsPage({
   adminBasePath = "/admin",
 }: AdminSettingsPageProps) {
   const settingsPath = getAdminPath(adminBasePath, "settings");
+  const loginPath = getAdminPath(adminBasePath, "login");
 
-  await requireAdminSession(getAdminPath(adminBasePath, "login"));
+  await requireAdminSession(loginPath);
   const [params, settingsState] = await Promise.all([searchParams, loadSiteSettingsState()]);
   const feedback = getAdminFeedback(params);
   const {settings, warning, source} = settingsState;
@@ -71,6 +72,7 @@ export default async function AdminSettingsPage({
 
               <form action={uploadSiteIconAction} className="space-y-4">
                 <input type="hidden" name="returnTo" value={settingsPath} />
+                <input type="hidden" name="loginReturnTo" value={loginPath} />
                 <AdminField
                   label="上传图标文件"
                   description={`支持 PNG / ICO / WEBP / JPEG，最大 ${Math.floor(SITE_ICON_MAX_BYTES / 1024 / 1024)} MB。上传后会自动应用到浏览器标签页与侧栏图标。`}
@@ -90,6 +92,7 @@ export default async function AdminSettingsPage({
 
               <form action={resetSiteIconAction}>
                 <input type="hidden" name="returnTo" value={settingsPath} />
+                <input type="hidden" name="loginReturnTo" value={loginPath} />
                 <Button type="submit" variant="outline" className="w-full rounded-full">
                   恢复默认图标
                 </Button>
@@ -103,6 +106,7 @@ export default async function AdminSettingsPage({
           >
             <form action={upsertSiteSettingsAction} className="space-y-4">
               <input type="hidden" name="returnTo" value={settingsPath} />
+              <input type="hidden" name="loginReturnTo" value={loginPath} />
 
               <div className="grid gap-4 md:grid-cols-2">
                 <AdminField label="站点名称" description="用于浏览器标题和部分全局品牌展示。">
@@ -119,7 +123,7 @@ export default async function AdminSettingsPage({
 
                 <AdminField
                   label="后台入口路径"
-                  description="保存后可通过该路径及其子路径进入后台，原 /admin 仍保留。"
+                  description="保存后可通过该路径及其子路径进入后台；非默认入口启用后，原 /admin 会返回 404。"
                 >
                   <AdminInput
                     name="admin_entry_path"

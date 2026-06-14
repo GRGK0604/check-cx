@@ -77,8 +77,9 @@ export default async function AdminNotificationsPage({
   adminBasePath = "/admin",
 }: AdminNotificationsPageProps) {
   const notificationsPath = getAdminPath(adminBasePath, "notifications");
+  const loginPath = getAdminPath(adminBasePath, "login");
 
-  await requireAdminSession(getAdminPath(adminBasePath, "login"));
+  await requireAdminSession(loginPath);
   const params = await searchParams;
   const feedback = getAdminFeedback(params);
   const detailId = getSearchParamValue(params, "recordId");
@@ -101,6 +102,7 @@ export default async function AdminNotificationsPage({
         <AdminPanel title="保存配置" description="Bot Token 与 Chat ID 会按原文保存并显示。">
           <form action={saveTelegramPushConfigAction} className="space-y-4">
             <input type="hidden" name="returnTo" value={notificationsPath} />
+            <input type="hidden" name="loginReturnTo" value={loginPath} />
 
             <AdminField
               label="项目显示名称"
@@ -148,6 +150,7 @@ export default async function AdminNotificationsPage({
         <AdminPanel title="测试推送" description="点击后直接向配置的 Chat ID 发送测试消息。">
           <form action={sendTelegramPushTestAction} className="space-y-4">
             <input type="hidden" name="returnTo" value={notificationsPath} />
+            <input type="hidden" name="loginReturnTo" value={loginPath} />
             <AdminField label="测试文本">
               <AdminTextarea
                 name="test_message"
@@ -246,6 +249,7 @@ export default async function AdminNotificationsPage({
                             <form action={retryTelegramPushRecordAction}>
                               <input type="hidden" name="id" value={record.id} />
                               <input type="hidden" name="returnTo" value={returnTo} />
+                              <input type="hidden" name="loginReturnTo" value={loginPath} />
                               <Button type="submit" variant="outline" size="sm" className="rounded-full">
                                 重试
                               </Button>

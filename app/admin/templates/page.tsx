@@ -26,8 +26,9 @@ export default async function AdminTemplatesPage({
   adminBasePath = "/admin",
 }: AdminTemplatesPageProps) {
   const templatesPath = getAdminPath(adminBasePath, "templates");
+  const loginPath = getAdminPath(adminBasePath, "login");
 
-  await requireAdminSession(getAdminPath(adminBasePath, "login"));
+  await requireAdminSession(loginPath);
   const [{templates}, params] = await Promise.all([loadAdminManagementData(), searchParams]);
   const feedback = getAdminFeedback(params);
 
@@ -44,6 +45,7 @@ export default async function AdminTemplatesPage({
         <AdminPanel title="新增模板" description="创建一个可复用模板。">
           <form action={upsertTemplateAction} className="space-y-4">
             <input type="hidden" name="returnTo" value={templatesPath} />
+            <input type="hidden" name="loginReturnTo" value={loginPath} />
 
             <AdminField label="模板名称">
               <AdminInput name="name" placeholder="默认请求头" required />
@@ -101,6 +103,7 @@ export default async function AdminTemplatesPage({
                     <form action={deleteTemplateAction}>
                       <input type="hidden" name="id" value={template.id} />
                       <input type="hidden" name="returnTo" value={templatesPath} />
+                      <input type="hidden" name="loginReturnTo" value={loginPath} />
                       <Button
                         type="submit"
                         variant="outline"
@@ -114,6 +117,7 @@ export default async function AdminTemplatesPage({
                   <form action={upsertTemplateAction} className="space-y-4">
                     <input type="hidden" name="id" value={template.id} />
                     <input type="hidden" name="returnTo" value={templatesPath} />
+                    <input type="hidden" name="loginReturnTo" value={loginPath} />
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <AdminField label="模板名称">

@@ -169,7 +169,8 @@ export async function loadAdminManagementData(): Promise<AdminManagementData> {
     .slice()
     .sort(
       (left, right) =>
-        new Date(right.latest.checkedAt).getTime() - new Date(left.latest.checkedAt).getTime()
+        (Date.parse(right.latest.checkedAt) || 0) -
+        (Date.parse(left.latest.checkedAt) || 0)
     )
     .slice(0, 8)
     .map((item) => ({
@@ -213,7 +214,7 @@ export async function loadAdminTelegramPushData(
     storage.telegramAlertStates.list({limit: null}),
     detailId ? storage.telegramPushRecords.getById(detailId) : Promise.resolve(null),
   ]);
-  const latestRecordRequests = new Map<string, Promise<TelegramPushRecord | null>>();
+  const latestRecordsByKey = new Map<string, TelegramPushRecord>();
   for (const record of records) {
     if (!record.event_type) {
       continue;
@@ -229,17 +230,11 @@ export async function loadAdminTelegramPushData(
       continue;
     }
 
-    latestRecordRequests.set(
-      retryKey,
-      storage.telegramPushRecords.findLatestByContext({
-        notificationKey: record.notification_key,
-        eventType: record.event_type,
-      })
-    );
+    if (!latestRecordsByKey.has(retryKey)) {
+      latestRecordsByKey.set(retryKey, record);
+    }
   }
-  const latestRecords = (await Promise.all(latestRecordRequests.values())).filter(
-    (record): record is TelegramPushRecord => Boolean(record)
-  );
+  const latestRecords = Array.from(latestRecordsByKey.values());
 
   const alertStateByKey = new Map<string, TelegramAlertStateRecord>(
     alertStates.map((state) => [state.notification_key, state])

@@ -11,13 +11,15 @@ import type {SiteSettings} from "@/lib/types/site-settings";
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 
 export function DashboardBootstrap({
+  initialData,
   siteSettings,
   canForceRefresh,
 }: {
+  initialData: DashboardData;
   siteSettings: SiteSettings;
   canForceRefresh: boolean;
 }) {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<DashboardData | null>(initialData);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadData = useCallback(async (forceFresh?: boolean) => {
@@ -37,6 +39,10 @@ export function DashboardBootstrap({
       setErrorMessage("数据加载失败，请稍后重试");
     }
   }, []);
+
+  useEffect(() => {
+    setData(initialData);
+  }, [initialData]);
 
   useEffect(() => {
     let isActive = true;

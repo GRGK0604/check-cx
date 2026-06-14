@@ -607,14 +607,11 @@ export async function checkWithAiSdk(
       };
     })();
 
-    const [streamObservation, completedText] = await Promise.all([
-      streamObservationPromise,
-      result.text,
-    ]);
+    const streamObservation = await streamObservationPromise;
 
     const completionLatencyMs = Date.now() - startedAt;
     const latencyMs = streamObservation.firstChunkLatencyMs ?? completionLatencyMs;
-    const collectedResponse = completedText.trim() || streamObservation.streamedText.trim();
+    const collectedResponse = streamObservation.streamedText.trim();
     const params = await buildParams();
 
     // 检查流处理过程中是否有错误

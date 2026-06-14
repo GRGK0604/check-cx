@@ -1,9 +1,9 @@
 import Link from "next/link";
 
+import {bootstrapAdminAction, loginAdminAction} from "@/app/admin/actions";
 import {AdminField, AdminInput, AdminStatusBanner} from "@/components/admin/admin-primitives";
 import {TurnstileWidget} from "@/components/admin/turnstile-widget";
 import {Button} from "@/components/ui/button";
-import {bootstrapAdminAction, loginAdminAction} from "@/app/admin/actions";
 import {
   ensureLoggedOutForLoginPage,
   getTurnstileSiteKey,
@@ -12,7 +12,6 @@ import {
 } from "@/lib/admin/auth";
 import {getAdminPath} from "@/lib/admin/paths";
 import {getAdminFeedback} from "@/lib/admin/view";
-import {loadManagedStorageSettings} from "@/lib/storage/bootstrap-store";
 import {resolveDatabaseBackend} from "@/lib/storage/resolver";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +36,6 @@ export default async function AdminLoginPage({
   const turnstileSiteKey = getTurnstileSiteKey();
   const turnstileEnabled = isTurnstileEnabled();
   const backend = resolveDatabaseBackend();
-  const managedSettings = loadManagedStorageSettings();
   let adminExists = false;
   let availabilityError: string | null = null;
 
@@ -47,20 +45,18 @@ export default async function AdminLoginPage({
     availabilityError =
       error instanceof Error && error.message.trim()
         ? error.message
-        : "当前无法连接管理员账户存储，请确认数据库后端已正确配置。";
+        : "当前无法连接管理员账号存储，请确认数据库后端已正确配置。";
   }
 
   return (
-    <div className="relative min-h-screen bg-background text-foreground flex flex-col items-center justify-center p-4 selection:bg-primary/20">
-      {/* Background Ambience */}
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-background p-4 text-foreground selection:bg-primary/20">
       <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute left-[20%] top-[20%] h-96 w-96 rounded-full bg-primary/10 blur-[120px] mix-blend-screen" />
         <div className="absolute bottom-[20%] right-[20%] h-96 w-96 rounded-full bg-blue-500/10 blur-[120px] mix-blend-screen" />
       </div>
 
-      <div className="w-full max-w-md space-y-8 relative">
-        {/* Header Section */}
-        <div className="text-center space-y-4">
+      <div className="relative w-full max-w-md space-y-8">
+        <div className="space-y-4 text-center">
           <Link
             href="/"
             className="inline-flex items-center justify-center rounded-full bg-muted/40 px-4 py-1.5 text-sm font-medium text-muted-foreground backdrop-blur-md transition-all hover:bg-muted/60 hover:text-foreground active:scale-[0.97]"
@@ -68,7 +64,7 @@ export default async function AdminLoginPage({
             返回公开页面
           </Link>
           <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+            <h1 className="bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-3xl font-semibold tracking-tight text-transparent sm:text-4xl">
               {adminExists ? "验证管理员身份" : "初始化控制面板"}
             </h1>
             <p className="text-sm text-muted-foreground/80">
@@ -77,21 +73,19 @@ export default async function AdminLoginPage({
           </div>
         </div>
 
-        {/* Info Pills */}
         <div className="flex items-center justify-center gap-3 text-xs font-medium text-muted-foreground">
           <div className="flex items-center gap-1.5 rounded-md border border-border/40 bg-background/50 px-2.5 py-1 backdrop-blur-sm">
             <div className="h-1.5 w-1.5 rounded-full bg-primary" />
             {backend.provider.toUpperCase()}
           </div>
-          {turnstileEnabled && (
+          {turnstileEnabled ? (
             <div className="flex items-center gap-1.5 rounded-md border border-border/40 bg-background/50 px-2.5 py-1 backdrop-blur-sm">
               <div className="h-1.5 w-1.5 rounded-full bg-green-500" />
               TURNSTILE
             </div>
-          )}
+          ) : null}
         </div>
 
-        {/* Main Card */}
         <div className="overflow-hidden rounded-2xl border border-border/40 bg-background/40 shadow-2xl backdrop-blur-xl">
           <div className="p-6 sm:p-8">
             {feedback ? (
@@ -136,21 +130,16 @@ export default async function AdminLoginPage({
                   />
                 </div>
 
-                <Button type="submit" className="w-full h-11 text-base font-medium shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30">
-                  {adminExists ? "登 录" : "初 始 化"}
+                <Button type="submit" className="h-11 w-full text-base font-medium shadow-lg shadow-primary/20 transition-all hover:shadow-primary/30">
+                  {adminExists ? "登录" : "初始化"}
                 </Button>
               </form>
             )}
           </div>
         </div>
 
-        {/* Footer Info */}
         <div className="text-center text-xs text-muted-foreground/60">
-          {managedSettings.hasSupabaseAdminCredentials
-            ? "已接入托管服务"
-            : managedSettings.supabaseProjectHost
-              ? `项目地址 ${managedSettings.supabaseProjectHost}`
-              : "本地运行环境"}
+          自建后端数据库
         </div>
       </div>
     </div>

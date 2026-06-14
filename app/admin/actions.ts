@@ -1,6 +1,10 @@
 "use server";
 
-import type {CheckConfigMutationInput, SiteSettingsMutationInput, StoredCheckConfigRow} from "@/lib/storage/types";
+import type {
+  CheckConfigMutationInput,
+  SiteSettingsMutationInput,
+  StoredCheckConfigRow,
+} from "@/lib/storage/types";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
 import {isRedirectError} from "next/dist/client/components/redirect-error";
@@ -12,9 +16,6 @@ import {
   requireAdminSession,
   verifyTurnstile,
 } from "@/lib/admin/auth";
-import {importControlPlaneToTarget, verifyManagedStorageImport} from "@/lib/admin/managed-storage-import";
-import {runPostgresConnectionDiagnostics} from "@/lib/admin/postgres-connection-diagnostics";
-import {runSupabaseAutoFix} from "@/lib/admin/supabase-diagnostics";
 import {ADMIN_NOTIFICATION_LEVELS, ADMIN_PROVIDER_TYPES} from "@/lib/admin/data";
 import {invalidateStorageDiagnosticsCache} from "@/lib/admin/storage-diagnostics-cache";
 import {invalidateDashboardCache} from "@/lib/core/dashboard-data";
@@ -26,34 +27,18 @@ import {
   saveTelegramPushConfig,
   sendTelegramPushTestMessage,
 } from "@/lib/notifications/telegram";
-import {invalidateSiteSettingsCache} from "@/lib/site-settings";
-import {
-  deleteManagedSiteIconByUrl,
-  ensureUploadedSiteIcon,
-  saveUploadedSiteIcon,
-  SITE_ICON_UPLOAD_FIELD_NAME,
-} from "@/lib/site-icons";
-import {
-  activateManagedStorageDraft,
-  recordManagedPostgresTestReport,
-  recordManagedStorageImportResult,
-  resetManagedStorageImportState,
-  updateManagedStorageDraft,
-} from "@/lib/storage/bootstrap-store";
-import {getControlPlaneStorage, resetStorageResolverCaches} from "@/lib/storage/resolver";
-import {createSupabaseControlPlaneStorage} from "@/lib/storage/supabase";
-import {ensureRuntimeMigrations, invalidateRuntimeMigrationCache} from "@/lib/supabase/runtime-migrations";
 import {normalizeProviderEndpoint} from "@/lib/providers/endpoint-utils";
-import {getErrorMessage, logError} from "@/lib/utils";
+import {deleteManagedSiteIconByUrl, ensureUploadedSiteIcon, saveUploadedSiteIcon, SITE_ICON_UPLOAD_FIELD_NAME} from "@/lib/site-icons";
+import {invalidateSiteSettingsCache} from "@/lib/site-settings";
+import {getControlPlaneStorage} from "@/lib/storage/resolver";
 import {
   DEFAULT_SITE_SETTINGS,
   normalizeAdminEntryPath,
   SITE_SETTINGS_SINGLETON_KEY,
 } from "@/lib/types/site-settings";
+import {getErrorMessage, logError} from "@/lib/utils";
 
 type JsonRecord = Record<string, unknown>;
-type ManagedStorageProvider = "supabase" | "postgres";
-type ManagedStorageBackupProvider = ManagedStorageProvider | "none";
 
 function getText(formData: FormData, key: string): string {
   const value = formData.get(key);
@@ -63,6 +48,65 @@ function getText(formData: FormData, key: string): string {
 function getOptionalText(formData: FormData, key: string): string | null {
   const value = getText(formData, key);
   return value ? value : null;
+}
+
+function splitReturnTo(value: string): {pathname: string; search: string} {
+  const hashIndex = value.indexOf("#");
+  const withoutHash = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+  const queryIndex = withoutHash.indexOf("?");
+
+  if (queryIndex < 0) {
+    return {pathname: withoutHash, search: ""};
+  }
+
+  return {
+    pathname: withoutHash.slice(0, queryIndex),
+    search: withoutHash.slice(queryIndex + 1),
+  };
+}
+
+function normalizeInternalReturnTo(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (
+    !raw ||
+    !raw.startsWith("/") ||
+    raw.startsWith("//") ||
+    raw.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(raw)
+  ) {
+    return null;
+  }
+
+  const {pathname: rawPathname, search} = splitReturnTo(raw);
+  if (!rawPathname || !rawPathname.startsWith("/") || rawPathname.startsWith("//")) {
+    return null;
+  }
+  if (/%2f|%5c/i.test(rawPathname)) {
+    return null;
+  }
+
+  let pathname: string;
+  try {
+    pathname = new URL(rawPathname, "https://modelhealthcheck.local").pathname;
+  } catch {
+    return null;
+  }
+
+  if (!pathname.startsWith("/") || pathname.startsWith("//")) {
+    return null;
+  }
+
+  const normalizedPathname = pathname === "/" ? pathname : pathname.replace(/\/+$/, "");
+  const normalizedSearch = search ? new URLSearchParams(search).toString() : "";
+  return normalizedSearch ? `${normalizedPathname}?${normalizedSearch}` : normalizedPathname;
+}
+
+function normalizeReturnTo(value: string | null | undefined, fallback: string): string {
+  return normalizeInternalReturnTo(value) ?? normalizeInternalReturnTo(fallback) ?? "/admin";
+}
+
+function getReturnTo(formData: FormData, key: string, fallback: string): string {
+  return normalizeReturnTo(getOptionalText(formData, key), fallback);
 }
 
 function getBoolean(formData: FormData, key: string): boolean {
@@ -179,7 +223,7 @@ function toCheckConfigMutationInput(
     template_id: row.template_id ?? null,
     request_header: row.request_header ?? null,
     metadata: row.metadata ?? null,
-    group_name: row.group_name ?? null,
+    group_name: null,
     ...overrides,
   };
 }
@@ -209,64 +253,12 @@ function ensureNotificationLevel(
   }
 }
 
-function ensureManagedStorageProvider(value: string): asserts value is ManagedStorageProvider {
-  if (value !== "supabase" && value !== "postgres") {
-    throw new Error("主后端仅支持 Supabase 或 PostgreSQL");
-  }
-}
-
-function ensureManagedStorageBackupProvider(
-  value: string
-): asserts value is ManagedStorageBackupProvider {
-  if (value !== "supabase" && value !== "postgres" && value !== "none") {
-    throw new Error("备用后端仅支持 Supabase、PostgreSQL 或 none");
-  }
-}
-
-function readManagedStorageDraft(formData: FormData): {
-  postgresConnectionString: string;
-  supabaseUrl: string;
-  supabasePublishableKey: string;
-  supabaseServiceRoleKey: string;
-  supabaseDbUrl: string;
-  draftPrimaryProvider: ManagedStorageProvider;
-  draftBackupProvider: ManagedStorageBackupProvider;
-} {
-  const draftPrimaryProvider = getText(formData, "draft_primary_provider");
-  const draftBackupProvider = getText(formData, "draft_backup_provider");
-  ensureManagedStorageProvider(draftPrimaryProvider);
-  ensureManagedStorageBackupProvider(draftBackupProvider);
-
-  if (draftPrimaryProvider === draftBackupProvider) {
-    throw new Error("主后端和备用后端不能相同");
-  }
-
-  return {
-    postgresConnectionString: getText(formData, "postgres_connection_string"),
-    supabaseUrl: getText(formData, "supabase_url"),
-    supabasePublishableKey: getText(formData, "supabase_publishable_or_anon_key"),
-    supabaseServiceRoleKey: getText(formData, "supabase_service_role_key"),
-    supabaseDbUrl: getText(formData, "supabase_db_url"),
-    draftPrimaryProvider,
-    draftBackupProvider,
-  };
-}
-
-function resolveManagedImportTarget(draft: {
-  draftPrimaryProvider: ManagedStorageProvider;
-  draftBackupProvider: ManagedStorageBackupProvider;
-}): ManagedStorageProvider {
-  return draft.draftPrimaryProvider === "postgres" || draft.draftBackupProvider === "postgres"
-    ? "postgres"
-    : "supabase";
-}
-
 function buildRedirectUrl(
   returnTo: string,
   noticeType: "success" | "error",
   message: string
 ): string {
-  const [pathname, search = ""] = returnTo.split("?");
+  const {pathname, search} = splitReturnTo(normalizeReturnTo(returnTo, "/admin"));
   const params = new URLSearchParams(search);
   params.set("notice", message);
   params.set("noticeType", noticeType);
@@ -274,11 +266,7 @@ function buildRedirectUrl(
 }
 
 function getPathnameFromReturnTo(returnTo: string): string {
-  const pathname = returnTo.split("?")[0]?.trim();
-  if (!pathname || !pathname.startsWith("/")) {
-    return "/admin";
-  }
-
+  const {pathname} = splitReturnTo(normalizeReturnTo(returnTo, "/admin"));
   return pathname.replace(/\/+$/, "") || "/admin";
 }
 
@@ -294,11 +282,10 @@ function getLoginPathFromReturnTo(returnTo: string): string {
     "notifications",
     "storage",
     "settings",
-    "supabase",
   ]);
   const segments = pathname.split("/").filter(Boolean);
   const lastSegment = segments.at(-1);
-  const baseSegments = lastSegment && adminChildSegments.has(lastSegment)
+  const baseSegments = lastSegment && segments.length > 1 && adminChildSegments.has(lastSegment)
     ? segments.slice(0, -1)
     : segments;
   const basePath = baseSegments.length > 0 ? `/${baseSegments.join("/")}` : "/admin";
@@ -307,7 +294,7 @@ function getLoginPathFromReturnTo(returnTo: string): string {
 }
 
 function getActionLoginPath(formData: FormData, returnTo: string): string {
-  return getOptionalText(formData, "loginReturnTo") ?? getLoginPathFromReturnTo(returnTo);
+  return getReturnTo(formData, "loginReturnTo", getLoginPathFromReturnTo(returnTo));
 }
 
 function revalidateAdminPaths(returnTo: string): void {
@@ -317,7 +304,7 @@ function revalidateAdminPaths(returnTo: string): void {
     "/admin/configs",
     "/admin/templates",
     "/admin/notifications",
-    "/admin/supabase",
+    "/admin/storage",
     "/admin/settings",
     returnTo.split("?")[0],
   ];
@@ -333,7 +320,6 @@ function invalidateOperationalCaches(): void {
   invalidateAvailabilityCache();
   invalidateStorageDiagnosticsCache();
   invalidateSiteSettingsCache();
-  invalidateRuntimeMigrationCache();
   clearPingCache();
 }
 
@@ -375,7 +361,7 @@ async function handleAction(
   successMessage: string,
   operation: () => Promise<void>
 ): Promise<never> {
-  const returnTo = getOptionalText(formData, "returnTo") ?? "/admin";
+  const returnTo = getReturnTo(formData, "returnTo", "/admin");
   await requireAdminSession(getActionLoginPath(formData, returnTo));
 
   try {
@@ -395,8 +381,8 @@ async function handleAction(
 }
 
 export async function bootstrapAdminAction(formData: FormData): Promise<never> {
-  const returnTo = getOptionalText(formData, "returnTo") ?? "/admin/storage";
-  const loginReturnTo = getOptionalText(formData, "loginReturnTo") ?? "/admin/login";
+  const returnTo = getReturnTo(formData, "returnTo", "/admin/storage");
+  const loginReturnTo = getReturnTo(formData, "loginReturnTo", "/admin/login");
 
   try {
     await verifyTurnstile(formData, "admin_bootstrap");
@@ -409,7 +395,7 @@ export async function bootstrapAdminAction(formData: FormData): Promise<never> {
       buildRedirectUrl(
         returnTo,
         "success",
-        "首个管理员已创建。现在可以保留 SQLite，或继续配置 PostgreSQL / Supabase。"
+        "首个管理员已创建。当前后端数据库已自动接入，可在存储诊断页查看状态。"
       )
     );
   } catch (error) {
@@ -423,8 +409,8 @@ export async function bootstrapAdminAction(formData: FormData): Promise<never> {
 }
 
 export async function loginAdminAction(formData: FormData): Promise<never> {
-  const returnTo = getOptionalText(formData, "returnTo") ?? "/admin";
-  const loginReturnTo = getOptionalText(formData, "loginReturnTo") ?? "/admin/login";
+  const returnTo = getReturnTo(formData, "returnTo", "/admin");
+  const loginReturnTo = getReturnTo(formData, "loginReturnTo", "/admin/login");
 
   try {
     await verifyTurnstile(formData, "login");
@@ -445,185 +431,13 @@ export async function loginAdminAction(formData: FormData): Promise<never> {
 }
 
 export async function logoutAdminAction(formData?: FormData): Promise<never> {
-  const returnTo = formData ? getOptionalText(formData, "returnTo") ?? "/admin/login" : "/admin/login";
+  const returnTo = formData ? getReturnTo(formData, "returnTo", "/admin/login") : "/admin/login";
   await clearAdminSession();
   redirect(buildRedirectUrl(returnTo, "success", "已退出登录"));
 }
 
-export async function runSupabaseAutoFixAction(returnTo = "/admin/storage"): Promise<never> {
-  await requireAdminSession(getLoginPathFromReturnTo(returnTo));
-
-  try {
-    const result = await runSupabaseAutoFix();
-    const message =
-      result.repairedCount > 0
-        ? `自动修复完成：${result.repairedItems.join("；")}`
-        : "当前没有可自动修复的数据库问题";
-
-    invalidateOperationalCaches();
-    revalidateAdminPaths(returnTo);
-    redirect(buildRedirectUrl(returnTo, "success", message));
-  } catch (error) {
-    if (isRedirectError(error)) {
-      throw error;
-    }
-
-    logError("admin action failed: runSupabaseAutoFix", error);
-    const message = error instanceof Error ? error.message : getErrorMessage(error);
-    redirect(buildRedirectUrl(returnTo, "error", message));
-  }
-}
-
-export async function saveManagedStorageDraftAction(formData: FormData): Promise<never> {
-  return handleAction(formData, "saveManagedStorageDraft", "后端草稿配置已保存", async () => {
-    updateManagedStorageDraft(readManagedStorageDraft(formData));
-  });
-}
-
-export async function testManagedPostgresAction(formData: FormData): Promise<never> {
-  return handleAction(formData, "testManagedPostgres", "PostgreSQL 连接测试完成", async () => {
-    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
-    const connectionString = draft.postgresConnectionString;
-    if (!connectionString) {
-      throw new Error("请先填写 PostgreSQL 连接串");
-    }
-
-    const report = await runPostgresConnectionDiagnostics(connectionString);
-    recordManagedPostgresTestReport(report);
-
-    if (!report.ok) {
-      throw new Error("PostgreSQL 连接测试未通过，请先修复失败项后再导入或启用");
-    }
-  });
-}
-
-export async function importManagedStorageAction(formData: FormData): Promise<never> {
-  return handleAction(formData, "importManagedStorage", "当前数据（含历史记录）已导入目标后端", async () => {
-    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
-    const targetProvider = resolveManagedImportTarget(draft);
-
-    if (targetProvider === "postgres" && !draft.postgresConnectionString) {
-      throw new Error("缺少 PostgreSQL 连接串，无法导入");
-    }
-    if (targetProvider === "postgres" && !draft.postgresLastTestOk) {
-      throw new Error("请先完成并通过 PostgreSQL 连接测试");
-    }
-    if (targetProvider === "supabase" && !draft.hasSupabaseAdminCredentials) {
-      throw new Error("请先填写 Supabase 地址和管理密钥，再执行导入");
-    }
-
-    const sourceStorage = await getControlPlaneStorage();
-    resetManagedStorageImportState();
-    const summary = await importControlPlaneToTarget({
-      sourceStorage,
-      targetProvider,
-      postgresConnectionString: draft.postgresConnectionString,
-    });
-    recordManagedStorageImportResult({ok: true, summary});
-  });
-}
-
-export async function activateManagedStorageAction(formData: FormData): Promise<never> {
-  return handleAction(formData, "activateManagedStorage", "托管存储配置已启用", async () => {
-    const draft = updateManagedStorageDraft(readManagedStorageDraft(formData));
-    const currentStorage = await getControlPlaneStorage();
-    const importTargetProvider = resolveManagedImportTarget(draft);
-
-    const usesSupabase =
-      draft.draftPrimaryProvider === "supabase" || draft.draftBackupProvider === "supabase";
-    if (usesSupabase && !draft.hasSupabaseAdminCredentials) {
-      throw new Error("请先填写 Supabase 地址和管理密钥，才能将其设为主后端或备用后端");
-    }
-    if (usesSupabase) {
-      const supabaseStorage = createSupabaseControlPlaneStorage({allowDraft: true});
-      await supabaseStorage.ensureReady();
-    }
-
-    if (
-      draft.draftPrimaryProvider === "supabase" &&
-      importTargetProvider === "postgres" &&
-      currentStorage.provider !== "supabase"
-    ) {
-      throw new Error(
-        "当前初始化流程还不能在一次启用中同时把现有数据（含历史记录）导入到 Supabase 主库并预热 PostgreSQL 备用库。请先把主后端设为 Supabase（备用后端设为 none）完成导入与启用，随后再把 PostgreSQL 配成备用后端。"
-      );
-    }
-
-    const usesPostgres =
-      draft.draftPrimaryProvider === "postgres" || draft.draftBackupProvider === "postgres";
-    if (usesPostgres) {
-      if (!draft.postgresConnectionString) {
-        throw new Error("请先填写 PostgreSQL 连接串");
-      }
-      if (!draft.postgresLastTestOk) {
-        throw new Error("请先完成并通过 PostgreSQL 连接测试");
-      }
-      if (!draft.lastImportOk) {
-        throw new Error("请先把当前数据（含历史记录）导入 PostgreSQL，再执行启用");
-      }
-    }
-
-    if (importTargetProvider === "supabase" && currentStorage.provider !== "supabase") {
-      if (!draft.lastImportOk || draft.lastImportSummary?.targetProvider !== "supabase") {
-        throw new Error("请先把当前数据（含历史记录）导入 Supabase，再执行启用");
-      }
-    }
-
-    if (importTargetProvider === "postgres" && currentStorage.provider !== "postgres") {
-      if (!draft.lastImportOk || draft.lastImportSummary?.targetProvider !== "postgres") {
-        throw new Error("请先把当前数据（含历史记录）导入 PostgreSQL，再执行启用");
-      }
-    }
-
-    if (draft.lastImportSummary) {
-      const verification = await verifyManagedStorageImport({
-        sourceStorage: currentStorage,
-        targetProvider: importTargetProvider,
-        postgresConnectionString: draft.postgresConnectionString,
-        summary: draft.lastImportSummary,
-      });
-
-      if (!verification.sourceMatchesImport) {
-        throw new Error("导入完成后源端数据（含历史记录）已发生变化，请重新导入后再执行启用，避免切换到过期数据");
-      }
-
-      if (!verification.targetMatchesImport) {
-        throw new Error("目标后端数据（含历史记录）与最近一次导入结果不一致，请重新导入后再执行启用");
-      }
-    }
-
-    activateManagedStorageDraft();
-    await resetStorageResolverCaches();
-  });
-}
-
-export async function runSupabaseAutoMigrateAction(returnTo = "/admin/storage"): Promise<never> {
-  await requireAdminSession(getLoginPathFromReturnTo(returnTo));
-
-  try {
-    const result = await ensureRuntimeMigrations({force: true});
-    const message = result.blockedReason
-      ? `自动迁移不可用：${result.blockedReason}`
-      : result.appliedCount > 0
-        ? `自动迁移完成：${result.appliedItems.join("；")}`
-        : "当前没有待执行的自动迁移";
-
-    invalidateOperationalCaches();
-    revalidateAdminPaths(returnTo);
-    redirect(buildRedirectUrl(returnTo, result.blockedReason ? "error" : "success", message));
-  } catch (error) {
-    if (isRedirectError(error)) {
-      throw error;
-    }
-
-    logError("admin action failed: runSupabaseAutoMigrate", error);
-    const message = error instanceof Error ? error.message : getErrorMessage(error);
-    redirect(buildRedirectUrl(returnTo, "error", message));
-  }
-}
-
 export async function upsertSiteSettingsAction(formData: FormData): Promise<never> {
-  const fallbackReturnTo = getOptionalText(formData, "returnTo") ?? "/admin/settings";
+  const fallbackReturnTo = getReturnTo(formData, "returnTo", "/admin/settings");
   await requireAdminSession(getActionLoginPath(formData, fallbackReturnTo));
   let successReturnTo = fallbackReturnTo;
 
@@ -773,7 +587,7 @@ export async function upsertConfigAction(formData: FormData): Promise<never> {
       is_maintenance: getBoolean(formData, "is_maintenance"),
       template_id: getOptionalText(formData, "template_id"),
       group_name: null,
-      request_header: parseJsonRecord(formData, "request_header", "请求头覆盖"),
+      request_header: parseJsonRecord(formData, "request_header", "请求头"),
       metadata: parseJsonRecord(formData, "metadata", "附加参数"),
     };
 
@@ -790,17 +604,12 @@ export async function upsertConfigAction(formData: FormData): Promise<never> {
       return;
     }
 
-    const editableConfig = existingConfig;
-    if (!editableConfig) {
-      throw new Error("未找到要更新的检测配置");
-    }
-
     if (models.length === 1) {
       await storage.checkConfigs.upsert({id, ...payload, model: models[0]});
       return;
     }
 
-    const baseName = stripGeneratedModelSuffix(name, editableConfig.model);
+    const baseName = stripGeneratedModelSuffix(name, existingConfig?.model ?? "");
     const [primaryModel, ...extraModels] = models;
 
     await storage.checkConfigs.upsert({
@@ -874,6 +683,7 @@ export async function manageConfigsAction(formData: FormData): Promise<never> {
     );
   });
 }
+
 export async function upsertTemplateAction(formData: FormData): Promise<never> {
   return handleAction(formData, "upsertTemplate", "请求模板已保存", async () => {
     const id = getOptionalText(formData, "id");
@@ -886,15 +696,14 @@ export async function upsertTemplateAction(formData: FormData): Promise<never> {
 
     ensureProviderType(type);
 
-    const payload = {
+    const storage = await getControlPlaneStorage();
+    await storage.requestTemplates.upsert({
+      id,
       name,
       type,
       request_header: parseJsonRecord(formData, "request_header", "模板请求头"),
       metadata: parseJsonRecord(formData, "metadata", "模板附加参数"),
-    };
-
-    const storage = await getControlPlaneStorage();
-    await storage.requestTemplates.upsert({id, ...payload});
+    });
   });
 }
 
@@ -922,14 +731,13 @@ export async function upsertNotificationAction(formData: FormData): Promise<neve
 
     ensureNotificationLevel(level);
 
-    const payload = {
+    const storage = await getControlPlaneStorage();
+    await storage.notifications.upsert({
+      id,
       message,
       level,
       is_active: getBoolean(formData, "is_active"),
-    };
-
-    const storage = await getControlPlaneStorage();
-    await storage.notifications.upsert({id, ...payload});
+    });
   });
 }
 
@@ -949,5 +757,3 @@ export async function deleteNotificationAction(formData: FormData): Promise<neve
     }
   );
 }
-
-

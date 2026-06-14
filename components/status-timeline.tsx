@@ -5,6 +5,7 @@ import {Clock} from "lucide-react";
 import {HoverCard, HoverCardContent, HoverCardTrigger} from "@/components/ui/hover-card";
 import {Badge} from "@/components/ui/badge";
 import {ClientTime} from "@/components/client-time";
+import {getStatusDayKey} from "@/lib/core/calendar-day";
 import {STATUS_META} from "@/lib/core/status";
 import type {TimelineItem} from "@/lib/types";
 import {cn} from "@/lib/utils";
@@ -34,6 +35,11 @@ const formatRemainingTime = (ms: number) => {
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
 
+function getTodayItems(items: TimelineItem[]) {
+  const todayKey = getStatusDayKey(new Date());
+  return items.filter((item) => getStatusDayKey(item.checkedAt) === todayKey);
+}
+
 export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: StatusTimelineProps) {
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
@@ -61,25 +67,19 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
     return () => media.removeEventListener("change", updatePointerType);
   }, []);
 
-  if (items.length === 0) {
-    if (isMaintenance) {
-      return (
-        <div className="flex items-center justify-center rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 p-4 text-xs text-blue-500">
-          维护中 · 已暂停时间线采集
-        </div>
-      );
-    }
+  if (isMaintenance) {
     return (
-      <div className="flex items-center justify-center rounded-lg border border-dashed border-border/50 bg-muted/10 p-4 text-xs text-muted-foreground">
-        暂无记录
+      <div className="flex items-center justify-center rounded-lg border border-dashed border-blue-500/30 bg-blue-500/5 p-4 text-xs text-blue-500">
+        维护中 · 已暂停时间线采集
       </div>
     );
   }
 
-  const segments = Array.from({ length: SEGMENT_LIMIT }, (_, index) =>
-    items[index] ?? null
-  );
-  const segmentCount = Math.min(items.length, SEGMENT_LIMIT);
+  const todayItems = getTodayItems(items);
+  const hasTodayItems = todayItems.length > 0;
+  const displayItems = hasTodayItems ? todayItems.slice(0, SEGMENT_LIMIT) : [];
+  const segments = Array.from({ length: SEGMENT_LIMIT }, (_, index) => displayItems[index] ?? null);
+  const segmentCount = Math.min(displayItems.length, SEGMENT_LIMIT);
   const nextRefreshLabel =
     typeof nextRefreshInMs === "number" ? formatRemainingTime(nextRefreshInMs) : null;
 
@@ -88,7 +88,13 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       {/* Header / Legend */}
       <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span>{segmentCount <= 1 ? "最近记录" : `最近 ${segmentCount} 条`}</span>
+          <span>
+            {hasTodayItems
+              ? segmentCount <= 1
+                ? "今日记录"
+                : `今日 ${segmentCount} 条`
+              : "今日默认 100%"}
+          </span>
         </div>
         <div className="flex items-center gap-2">
            {nextRefreshLabel ? (
@@ -103,15 +109,20 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       </div>
 
       {/* Timeline Bar */}
-      <div className="relative h-8 w-full overflow-hidden rounded-sm bg-muted/20">
-        <div className="flex h-full w-full flex-row-reverse gap-[2px] p-[2px]">
+      <div className="relative h-8 w-full overflow-hidden rounded-sm">
+        <div className="flex h-full w-full flex-row-reverse items-stretch gap-[3px]">
           {segments.map((segment, index) => {
             if (!segment) {
               return (
                 <div
                   key={`placeholder-${index}`}
-                  className="flex-1 rounded-[1px] bg-muted/10"
-                  aria-label="暂无记录"
+                  className={cn(
+                    "h-full w-[6px] flex-1 rounded-[1px]",
+                    hasTodayItems
+                      ? "border border-dashed border-border/30 bg-muted/10"
+                      : "bg-emerald-500"
+                  )}
+                  aria-label={hasTodayItems ? "暂无记录" : "今日默认正常"}
                 />
               );
             }
@@ -138,7 +149,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
                   <button
                     type="button"
                     className={cn(
-                      "relative block h-full w-full flex-1 rounded-[1px] transition-all duration-200",
+                      "relative block h-full w-[6px] flex-1 rounded-[1px] transition-all duration-200",
                       preset?.dot, // Use the existing bg utility from meta
                       "hover:opacity-80 hover:scale-y-110",
                       isOpen && "ring-1 ring-foreground/20 scale-y-110 z-10"

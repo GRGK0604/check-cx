@@ -2,12 +2,12 @@
  * Dashboard 数据聚合模块
  *
  * 职责：
- * - 从 Supabase 读取最近的检查历史（按 Provider 聚合）
+ * - 从当前后端数据库读取最近的检查历史（按 Provider 聚合）
  * - 在必要时触发一次新的 Provider 检测并写入历史
  * - 结合轮询配置与官方状态，生成 DashboardView 所需的完整数据结构
  */
 import {loadProviderConfigsFromDB} from "../database/config-loader";
-import {getAvailabilityStats} from "../database/availability";
+import {getDailyHistoryLimitPerConfig} from "../database/history";
 import {getPollingIntervalLabel, getPollingIntervalMs} from "./polling-config";
 import {ensureOfficialStatusPoller} from "./official-status-poller";
 import {ensureCheckPoller} from "./poller";
@@ -80,6 +80,35 @@ function buildDashboardEtag(data: DashboardData): string {
   return generateETag(jsonBody);
 }
 
+function isBuildPhase(): boolean {
+  const maybeProcess = Reflect.get(globalThis, "process");
+  if (!maybeProcess || typeof maybeProcess !== "object") {
+    return false;
+  }
+
+  const maybeEnv = Reflect.get(maybeProcess, "env");
+  if (!maybeEnv || typeof maybeEnv !== "object") {
+    return false;
+  }
+
+  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
+}
+
+function getEmptyDashboardData(trendPeriod: AvailabilityPeriod): DashboardLoadResult {
+  const pollIntervalMs = getPollingIntervalMs();
+  const data: DashboardData = {
+    providerTimelines: [],
+    lastUpdated: null,
+    total: 0,
+    pollIntervalLabel: getPollingIntervalLabel(),
+    pollIntervalMs,
+    trendPeriod,
+    generatedAt: Date.now(),
+  };
+
+  return {data, etag: buildDashboardEtag(data)};
+}
+
 export interface DashboardLoadResult {
   data: DashboardData;
   etag: string;
@@ -115,6 +144,11 @@ async function loadDashboardDataInternal(options?: {
   trendPeriod?: AvailabilityPeriod;
   bypassCache?: boolean;
 }): Promise<DashboardLoadResult> {
+  const trendPeriod = options?.trendPeriod ?? "7d";
+  if (isBuildPhase()) {
+    return getEmptyDashboardData(trendPeriod);
+  }
+
   ensureOfficialStatusPoller();
   ensureCheckPoller();
   const allConfigs = await loadProviderConfigsFromDB();
@@ -127,8 +161,8 @@ async function loadDashboardDataInternal(options?: {
   const providerKey =
     allowedIds.size > 0 ? [...allowedIds].sort().join("|") : "__empty__";
   const refreshMode = options?.refreshMode ?? "missing";
-  const trendPeriod = options?.trendPeriod ?? "7d";
   const cacheKey = `dashboard:${pollIntervalMs}:${providerKey}`;
+  const historyLimitPerConfig = getDailyHistoryLimitPerConfig(pollIntervalMs);
   const cacheKeyWithPeriod = getDashboardCacheKey(
     pollIntervalMs,
     providerKey,
@@ -136,7 +170,10 @@ async function loadDashboardDataInternal(options?: {
   );
   const cacheTtlMs = getDashboardCacheTtlMs(pollIntervalMs);
   const now = Date.now();
-  const shouldBypassCache = refreshMode === "always" || options?.bypassCache === true;
+  const shouldBypassCache =
+    refreshMode === "always" ||
+    refreshMode === "interval" ||
+    options?.bypassCache === true;
 
   const loadData = async (): Promise<DashboardLoadResult> => {
     const history = await loadSnapshotForScope(
@@ -145,6 +182,7 @@ async function loadDashboardDataInternal(options?: {
         pollIntervalMs,
         activeConfigs,
         allowedIds,
+        limitPerConfig: historyLimitPerConfig,
       },
       refreshMode
     );
@@ -157,7 +195,10 @@ async function loadDashboardDataInternal(options?: {
       if (timeline.items.length === 0) {
         continue;
       }
-      const checkedAtMs = Date.parse(timeline.latest.checkedAt);
+      const checkedAtMs =
+        timeline.latest.checkedAt && timeline.items.length > 0
+          ? Date.parse(timeline.latest.checkedAt)
+          : Number.NaN;
       if (Number.isFinite(checkedAtMs) && checkedAtMs > lastUpdatedMs) {
         lastUpdatedMs = checkedAtMs;
         lastUpdated = timeline.latest.checkedAt;
@@ -165,8 +206,6 @@ async function loadDashboardDataInternal(options?: {
     }
 
     const generatedAt = Date.now();
-    const configIds = allConfigs.map((config) => config.id);
-    const availabilityStats = await getAvailabilityStats(configIds);
 
     const data: DashboardData = {
       providerTimelines,
@@ -174,7 +213,6 @@ async function loadDashboardDataInternal(options?: {
       total: providerTimelines.length,
       pollIntervalLabel,
       pollIntervalMs,
-      availabilityStats,
       trendPeriod,
       generatedAt,
     };

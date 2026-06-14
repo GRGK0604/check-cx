@@ -26,6 +26,18 @@ type LooseRow = Record<string, unknown>;
 
 export const TELEGRAM_PUSH_SINGLETON_KEY = "global";
 export const DEFAULT_TELEGRAM_PUSH_PROJECT_NAME = "RKAPI模型状态检测";
+export const CHECK_HISTORY_STATUS_VALUES = [
+  "operational",
+  "degraded",
+  "failed",
+  "validation_failed",
+  "maintenance",
+  "error",
+  "pending",
+] as const;
+export const CHECK_HISTORY_STATUS_SQL_LIST = CHECK_HISTORY_STATUS_VALUES
+  .map((status) => `'${status}'`)
+  .join(", ");
 
 export const POSTGRES_CONTROL_PLANE_SCHEMA_STATEMENTS = [
   `
@@ -168,7 +180,7 @@ export const POSTGRES_RUNTIME_SCHEMA_STATEMENTS = [
       message text,
       created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
       CONSTRAINT check_history_status_valid CHECK (
-        status IN ('operational', 'degraded', 'failed', 'validation_failed', 'maintenance', 'error', 'pending')
+        status IN (${CHECK_HISTORY_STATUS_SQL_LIST})
       ),
       CONSTRAINT check_history_latency_positive CHECK (latency_ms IS NULL OR latency_ms >= 0)
     )
@@ -320,7 +332,7 @@ export const SQLITE_RUNTIME_SCHEMA_STATEMENTS = [
       checked_at text NOT NULL,
       message text,
       created_at text NOT NULL,
-      CHECK (status IN ('operational', 'degraded', 'failed', 'validation_failed', 'maintenance', 'error', 'pending')),
+      CHECK (status IN (${CHECK_HISTORY_STATUS_SQL_LIST})),
       CHECK (latency_ms IS NULL OR latency_ms >= 0)
     )
   `,

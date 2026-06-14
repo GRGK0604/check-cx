@@ -8,6 +8,8 @@ import Database from "better-sqlite3";
 import {getErrorMessage} from "@/lib/utils";
 
 import {
+  CHECK_HISTORY_STATUS_SQL_LIST,
+  CHECK_HISTORY_STATUS_VALUES,
   createStorageId,
   getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
@@ -51,8 +53,6 @@ const capabilities: StorageCapabilities = {
   historySnapshots: true,
   availabilityStats: true,
   pollerLease: false,
-  runtimeMigrations: false,
-  supabaseDiagnostics: false,
   autoProvisionControlPlane: true,
 };
 
@@ -107,6 +107,73 @@ function ensureColumnExists(
   db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`).run();
 }
 
+function ensureCheckHistoryStatusConstraint(db: Database.Database) {
+  const row = db
+    .prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'check_history'`)
+    .get() as {sql?: string} | undefined;
+  const tableSql = row?.sql ?? "";
+  const isCurrent = CHECK_HISTORY_STATUS_VALUES.every((status) =>
+    tableSql.includes(`'${status}'`)
+  );
+
+  if (!tableSql || isCurrent) {
+    return;
+  }
+
+  const migrate = db.transaction(() => {
+    db.prepare(`ALTER TABLE check_history RENAME TO check_history_legacy_status_constraint`).run();
+    db.prepare(
+      `
+        CREATE TABLE check_history (
+          id integer PRIMARY KEY AUTOINCREMENT,
+          config_id text NOT NULL REFERENCES check_configs(id) ON DELETE CASCADE,
+          status text NOT NULL,
+          latency_ms integer,
+          ping_latency_ms real,
+          checked_at text NOT NULL,
+          message text,
+          created_at text NOT NULL,
+          CHECK (status IN (${CHECK_HISTORY_STATUS_SQL_LIST})),
+          CHECK (latency_ms IS NULL OR latency_ms >= 0)
+        )
+      `
+    ).run();
+    db.prepare(
+      `
+        INSERT INTO check_history (
+          id,
+          config_id,
+          status,
+          latency_ms,
+          ping_latency_ms,
+          checked_at,
+          message,
+          created_at
+        )
+        SELECT
+          id,
+          config_id,
+          CASE
+            WHEN status IN (${CHECK_HISTORY_STATUS_SQL_LIST}) THEN status
+            ELSE 'error'
+          END AS status,
+          latency_ms,
+          ping_latency_ms,
+          checked_at,
+          message,
+          created_at
+        FROM check_history_legacy_status_constraint
+      `
+    ).run();
+    db.prepare(`DROP TABLE check_history_legacy_status_constraint`).run();
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_check_history_config_id ON check_history (config_id)`).run();
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_check_history_checked_at ON check_history (checked_at DESC)`).run();
+    db.prepare(`CREATE INDEX IF NOT EXISTS idx_history_config_checked ON check_history (config_id, checked_at DESC)`).run();
+  });
+
+  migrate();
+}
+
 export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneStorage {
   const db = getDatabase(filePath);
   let readyPromise: Promise<void> | null = null;
@@ -126,6 +193,7 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           db.prepare(statement).run();
         }
 
+        ensureCheckHistoryStatusConstraint(db);
         ensureColumnExists(db, "site_settings", "site_icon_url", "text NOT NULL DEFAULT '/favicon.png'");
         ensureColumnExists(db, "site_settings", "admin_entry_path", "text NOT NULL DEFAULT '/admin'");
         ensureColumnExists(

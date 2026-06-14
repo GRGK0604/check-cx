@@ -17,7 +17,7 @@ import type {CheckResult, HealthStatus} from "@/lib/types";
 import {getErrorMessage} from "@/lib/utils";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
-const TELEGRAM_SEND_TIMEOUT_MS = 8_000;
+const TELEGRAM_SEND_TIMEOUT_MS = 20_000;
 const FAILURE_THRESHOLD = 3;
 const RECOVERY_THRESHOLD = 1;
 const FAILURE_STATUSES: ReadonlySet<HealthStatus> = new Set([
@@ -92,6 +92,24 @@ function getResultMessage(result: CheckResult): string {
 
 function getLatencyText(result: CheckResult): string {
   return typeof result.latencyMs === "number" ? `${result.latencyMs}ms` : "N/A";
+}
+
+function escapeTelegramHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function formatTelegramContentForSend(content: string): string {
+  const [firstLine = "", ...restLines] = content.split("\n");
+  const escapedRestLines = restLines.map(escapeTelegramHtml);
+
+  if (firstLine.startsWith("[") && firstLine.includes("]")) {
+    return [`<b>${escapeTelegramHtml(firstLine)}</b>`, ...escapedRestLines].join("\n");
+  }
+
+  return [escapeTelegramHtml(firstLine), ...escapedRestLines].join("\n");
 }
 
 function getFailureDurationText(startedAt: string | null, recoveredAt: string): string {
@@ -192,14 +210,25 @@ async function sendTelegramMessage(input: {
       },
       body: JSON.stringify({
         chat_id: input.chatId,
-        text: input.text,
+        text: formatTelegramContentForSend(input.text),
+        parse_mode: "HTML",
         disable_web_page_preview: true,
       }),
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
+    const body = await response.text().catch(() => "");
+    let payload: {ok?: boolean; description?: string} | null = null;
+    if (body) {
+      try {
+        payload = JSON.parse(body) as {ok?: boolean; description?: string};
+      } catch {
+        payload = null;
+      }
+    }
+
+    if (!response.ok || payload?.ok === false) {
+      const detail = payload?.description ?? body;
       throw new Error(`Telegram 推送失败：${response.status} ${detail}`.trim());
     }
   } finally {
@@ -215,10 +244,36 @@ async function sendRecordWithConfig(
   const botToken = config.bot_token;
   const chatId = config.chat_id;
   const nextPushCount = record.push_count + 1;
+  const updateRecordStatus = async (
+    input: Omit<Parameters<typeof storage.telegramPushRecords.updateStatus>[0], "id">
+  ): Promise<TelegramPushRecord> => {
+    try {
+      return await storage.telegramPushRecords.updateStatus({
+        id: record.id,
+        ...input,
+      });
+    } catch (error) {
+      console.error(
+        "[modelhealthcheck] Telegram push record status update failed",
+        getErrorMessage(error)
+      );
+
+      return {
+        ...record,
+        status: input.status,
+        push_count: input.push_count,
+        failure_reason:
+          input.failure_reason === undefined ? record.failure_reason : input.failure_reason,
+        last_pushed_at:
+          input.last_pushed_at === undefined ? record.last_pushed_at : input.last_pushed_at,
+        chat_id: input.chat_id === undefined ? record.chat_id : input.chat_id,
+        updated_at: new Date().toISOString(),
+      };
+    }
+  };
 
   if (!botToken || !chatId) {
-    return storage.telegramPushRecords.updateStatus({
-      id: record.id,
+    return updateRecordStatus({
       status: "failed",
       push_count: nextPushCount,
       failure_reason: "Telegram 推送未配置 Bot Token 或 Chat ID",
@@ -233,23 +288,22 @@ async function sendRecordWithConfig(
       text: record.content,
     });
 
-    return storage.telegramPushRecords.updateStatus({
-      id: record.id,
-      status: "sent",
-      push_count: nextPushCount,
-      failure_reason: null,
-      last_pushed_at: new Date().toISOString(),
-      chat_id: chatId,
-    });
   } catch (error) {
-    return storage.telegramPushRecords.updateStatus({
-      id: record.id,
+    return updateRecordStatus({
       status: "failed",
       push_count: nextPushCount,
       failure_reason: getErrorMessage(error),
       chat_id: chatId,
     });
   }
+
+  return updateRecordStatus({
+    status: "sent",
+    push_count: nextPushCount,
+    failure_reason: null,
+    last_pushed_at: new Date().toISOString(),
+    chat_id: chatId,
+  });
 }
 
 async function createAndSendTelegramPushRecord(input: {

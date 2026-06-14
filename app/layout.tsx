@@ -1,6 +1,5 @@
 import type {Metadata} from "next";
 import "./globals.css";
-import "@/lib/core/poller";
 import NextTopLoader from "nextjs-toploader";
 import {ThemeProvider} from "@/components/theme-provider";
 import {NotificationBanner} from "@/components/notification-banner";

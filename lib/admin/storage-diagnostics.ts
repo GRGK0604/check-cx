@@ -2,12 +2,11 @@ import "server-only";
 
 import {
   getControlPlaneStorage,
-  getStorageCapabilities,
   getRuntimeStorageResolution,
+  getStorageCapabilities,
   resolveDatabaseBackend,
 } from "@/lib/storage/resolver";
 import type {ControlPlaneStorage, StorageCapabilities} from "@/lib/storage/types";
-import {runSupabaseDiagnostics, type SupabaseDiagnosticsReport} from "@/lib/admin/supabase-diagnostics";
 import {SITE_SETTINGS_SINGLETON_KEY} from "@/lib/types/site-settings";
 import {getErrorMessage} from "@/lib/utils";
 
@@ -46,7 +45,6 @@ export interface StorageDiagnosticsReport {
   backendChecks: StorageDiagnosticCheck[];
   repositoryChecks: StorageDiagnosticCheck[];
   capabilityItems: StorageCapabilityItem[];
-  supabaseReport: SupabaseDiagnosticsReport | null;
 }
 
 const CAPABILITY_LABELS: Array<{
@@ -58,7 +56,7 @@ const CAPABILITY_LABELS: Array<{
   {
     id: "adminAuth",
     label: "管理员认证",
-    enabledDetail: "当前后端支持管理员账户、密码哈希与会话登录。",
+    enabledDetail: "当前后端支持管理员账号、密码哈希与会话登录。",
     disabledDetail: "当前后端不支持管理员认证。",
   },
   {
@@ -74,40 +72,40 @@ const CAPABILITY_LABELS: Array<{
     disabledDetail: "当前后端无法管理控制面数据。",
   },
   {
+    id: "requestTemplates",
+    label: "请求模板",
+    enabledDetail: "支持请求模板的读取、保存和删除。",
+    disabledDetail: "当前后端不支持请求模板管理。",
+  },
+  {
+    id: "notifications",
+    label: "系统通知",
+    enabledDetail: "支持系统通知与 Telegram 推送配置持久化。",
+    disabledDetail: "当前后端不支持通知数据持久化。",
+  },
+  {
     id: "historySnapshots",
     label: "历史快照",
     enabledDetail: "支持历史状态快照与相关仪表盘聚合。",
-    disabledDetail: "当前后端不提供历史快照；相关区域会优雅降级。",
+    disabledDetail: "当前后端不提供历史快照，相关区域会降级为空结果。",
   },
   {
     id: "availabilityStats",
     label: "可用性统计",
-    enabledDetail: "支持 availability 统计视图与运行态概览。",
-    disabledDetail: "当前后端不提供 availability 统计；会以空结果降级。",
+    enabledDetail: "支持可用性统计视图与运行态概览。",
+    disabledDetail: "当前后端不提供可用性统计，会以空结果降级。",
   },
   {
     id: "pollerLease",
     label: "轮询租约",
-    enabledDetail: "该能力标记主要用于说明与上游后端能力兼容；当前仓库默认部署模型仍按单进程轮询运行。",
-    disabledDetail: "当前后端不提供租约相关兼容能力，部署时按单节点模式理解即可。",
-  },
-  {
-    id: "runtimeMigrations",
-    label: "运行时迁移",
-    enabledDetail: "支持在受限范围内执行运行时结构迁移。",
-    disabledDetail: "当前后端不走 Supabase 运行时迁移链路。",
-  },
-  {
-    id: "supabaseDiagnostics",
-    label: "Supabase 专属诊断",
-    enabledDetail: "可显示 Supabase 环境、客户端、关系和自动修复状态。",
-    disabledDetail: "当前后端不是 Supabase，隐藏 Supabase 专属诊断。",
+    enabledDetail: "当前后端支持跨实例轮询租约。",
+    disabledDetail: "当前自建后端按单节点轮询模型运行。",
   },
   {
     id: "autoProvisionControlPlane",
     label: "自动建表",
     enabledDetail: "当前后端会在首次使用时自动准备控制面表结构。",
-    disabledDetail: "当前后端依赖既有结构，不会自动建表。",
+    disabledDetail: "当前后端依赖已有结构，不会自动建表。",
   },
 ];
 
@@ -176,22 +174,10 @@ function getBackendChecks(
   if (runtime?.isBlocked) {
     checks.push({
       id: "backend-blocked",
-      label: runtime.isFailover ? "故障切换已阻断" : "后端初始化已阻断",
+      label: "后端初始化已阻断",
       status: "fail",
-      detail: runtime.isFailover
-        ? `首选后端 ${preferredProvider} 失败后，Postgres 兜底也未能完成初始化，因此应用保持阻断状态。`
-        : `首选后端 ${preferredProvider} 未能完成初始化；存在远端后端配置时不会自动切到可写 SQLite。`,
-      hint: input.storageError ?? runtime.failoverError ?? "请先修复当前首选后端或补齐远端兜底配置。",
-    });
-  } else if (runtime?.isFailover) {
-    checks.push({
-      id: "backend-failover",
-      label: "受控故障切换",
-      status: "warn",
-      detail: `首选后端 ${preferredProvider} 初始化失败，当前已受控切换到 ${activeProvider}。`,
-      hint: runtime.failoverError
-        ? `最近一次主后端失败信息：${runtime.failoverError}`
-        : "当前未记录主后端错误详情。",
+      detail: `首选后端 ${preferredProvider} 未能完成初始化，当前不会自动切换到其他可写后端。`,
+      hint: input.storageError ?? runtime.failoverError ?? "请先修复当前后端配置或数据库可用性。",
     });
   }
 
@@ -201,7 +187,7 @@ function getBackendChecks(
       label: "SQLite 文件路径",
       status: "warn",
       detail: backend.sqliteFilePath,
-      hint: "SQLite 适合本地或轻量单节点运行，不提供分布式租约与 Supabase 专属诊断。",
+      hint: "SQLite 适合本地或轻量单节点运行。如需容器化持久运行，建议挂载该目录。",
     });
   }
 
@@ -215,8 +201,8 @@ function getBackendChecks(
         ? `已从 ${source} 解析到当前 PostgreSQL 连接`
         : "未解析到直连数据库连接串",
       hint: source
-        ? "当前模式会自动准备控制面表，但高级 Supabase 诊断将隐藏。"
-        : "请先在托管存储配置中保存并启用 PostgreSQL，或补齐 DATABASE_URL / POSTGRES_URL / POSTGRES_PRISMA_URL / SUPABASE_DB_URL。",
+        ? "当前后端由环境连接串自动解析。"
+        : "请补齐 DATABASE_URL / POSTGRES_URL / POSTGRES_PRISMA_URL。",
     });
   }
 
@@ -238,7 +224,7 @@ async function getRepositoryChecks(storage: ControlPlaneStorage): Promise<Storag
       const hasAny = await storage.adminUsers.hasAny();
       return {
         status: "pass",
-        detail: hasAny ? "已检测到至少一个管理员账户。" : "当前还没有管理员账户，适合首次初始化。",
+        detail: hasAny ? "已检测到至少一个管理员账号。" : "当前还没有管理员账号，适合首次初始化。",
       };
     }),
     timedCheck("repo-site-settings", "站点设置仓库", async () => {
@@ -274,7 +260,9 @@ async function getRepositoryChecks(storage: ControlPlaneStorage): Promise<Storag
       const row = await storage.telegramAlertStates.get("__diagnostic__:__probe__");
       return {
         status: "pass",
-        detail: row ? "Telegram 告警状态仓库读取正常。" : "Telegram 告警状态仓库读取正常，当前无诊断探测记录。",
+        detail: row
+          ? "Telegram 告警状态仓库读取正常。"
+          : "Telegram 告警状态仓库读取正常，当前无诊断探测记录。",
       };
     }),
     timedCheck("repo-telegram-push-config", "Telegram 推送配置仓库", async () => {
@@ -333,12 +321,9 @@ export async function runStorageDiagnostics(): Promise<StorageDiagnosticsReport>
 
   const runtime = getRuntimeStorageResolution();
   const capabilities = storage?.capabilities ?? getStorageCapabilities();
-  const [repositoryChecks, supabaseReport] = storageReady && storage
-    ? await Promise.all([
-        getRepositoryChecks(storage),
-        capabilities.supabaseDiagnostics ? runSupabaseDiagnostics() : Promise.resolve(null),
-      ])
-    : [[
+  const repositoryChecks = storageReady && storage
+    ? await getRepositoryChecks(storage)
+    : [
         {
           id: "repo-storage-init",
           label: "存储初始化",
@@ -347,10 +332,10 @@ export async function runStorageDiagnostics(): Promise<StorageDiagnosticsReport>
             ? `当前后端未能完成初始化：${storageError}`
             : "当前后端未能完成初始化。",
           hint: runtime?.isBlocked
-            ? "项目已保持阻断状态，不会在存在远端配置时改用可写 SQLite。"
-            : "请检查当前存储后端配置、凭据或数据库可用性。",
+            ? "项目已保持阻断状态，不会自动切换到其他可写后端。"
+            : "请检查当前数据库后端配置、凭据或数据库可用性。",
         },
-      ], null];
+      ];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -368,6 +353,5 @@ export async function runStorageDiagnostics(): Promise<StorageDiagnosticsReport>
     backendChecks: getBackendChecks(capabilities, {storageReady, storageError}),
     repositoryChecks,
     capabilityItems: buildCapabilityItems(capabilities),
-    supabaseReport,
   };
 }

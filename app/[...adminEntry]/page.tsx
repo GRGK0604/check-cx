@@ -1,5 +1,5 @@
 import type {ReactNode} from "react";
-import {notFound, redirect} from "next/navigation";
+import {notFound} from "next/navigation";
 
 import AdminOverviewPage from "@/app/admin/page";
 import AdminConfigsPage from "@/app/admin/configs/page";
@@ -74,10 +74,6 @@ export default async function CustomAdminEntryPage({
   const subPath = resolveAliasSubPath(requestedPath, adminEntryPath);
   if (subPath === null) {
     notFound();
-  }
-
-  if (subPath === "supabase") {
-    redirect(`${adminEntryPath}/storage`);
   }
 
   if (subPath === "login") {

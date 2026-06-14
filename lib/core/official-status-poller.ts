@@ -53,6 +53,20 @@ function setOfficialStatusPolling(polling: boolean): void {
  */
 const officialStatusCache = getOfficialStatusCache();
 
+function isBuildPhase(): boolean {
+  const maybeProcess = Reflect.get(globalThis, "process");
+  if (!maybeProcess || typeof maybeProcess !== "object") {
+    return false;
+  }
+
+  const maybeEnv = Reflect.get(maybeProcess, "env");
+  if (!maybeEnv || typeof maybeEnv !== "object") {
+    return false;
+  }
+
+  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
+}
+
 /**
  * 获取指定 Provider 的官方状态(从缓存)
  * @param type - Provider 类型
@@ -121,6 +135,10 @@ async function runOfficialStatusCheck(): Promise<void> {
  * 在模块加载时自动调用,不对外暴露
  */
 export function startOfficialStatusPoller(): void {
+  if (isBuildPhase()) {
+    return;
+  }
+
   if (getOfficialStatusTimer() !== null) {
     console.log("[官方状态] 轮询器已在运行,跳过启动");
     return;

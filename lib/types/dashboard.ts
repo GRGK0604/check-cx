@@ -38,7 +38,6 @@ export interface DashboardData {
   total: number;
   pollIntervalLabel: string;
   pollIntervalMs: number;
-  availabilityStats?: AvailabilityStatsMap;
   trendPeriod: AvailabilityPeriod;
   /**
    * 服务端生成该数据的时间戳（ms）
@@ -50,13 +49,14 @@ export interface DashboardData {
 /**
  * 刷新模式
  */
-export type RefreshMode = "always" | "missing" | "never";
+export type RefreshMode = "always" | "interval" | "missing" | "never";
 
 /**
  * Ping 缓存条目
  */
 export interface PingCacheEntry {
   lastPingAt: number;
+  lastHistoryLoadedAt?: number;
   inflight?: Promise<HistorySnapshot>;
   history?: HistorySnapshot;
 }

@@ -120,9 +120,9 @@ export async function loadSiteSettingsState(): Promise<SiteSettingsState> {
     const capabilities = getStorageCapabilities();
     const fallbackState = getSettingsFallbackState(
       isMissingRelationError(message)
-        ? capabilities.runtimeMigrations
-          ? "站点设置存储尚未就绪，当前使用默认品牌配置。请先执行 Supabase 自动迁移或手动补齐最新结构。"
-          : "站点设置存储尚未初始化，当前使用默认品牌配置。所选数据库后端会在首次写入时自动创建控制面表结构。"
+        ? capabilities.autoProvisionControlPlane
+          ? "站点设置存储尚未初始化，当前使用默认品牌配置。当前后端会在首次写入时自动创建控制面表结构。"
+          : "站点设置存储尚未就绪，当前使用默认品牌配置。请先补齐当前后端数据库结构。"
         : `读取站点设置失败，当前使用默认配置：${message}`
     );
     cache = {

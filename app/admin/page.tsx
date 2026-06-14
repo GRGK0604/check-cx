@@ -1,4 +1,4 @@
-import {ArrowRight, BellRing, Boxes, Database, HardDrive, Layers3, Settings2} from "lucide-react";
+import {ArrowRight, BellRing, Boxes, HardDrive, Layers3, Settings2} from "lucide-react";
 import Link from "next/link";
 
 import {AdminPanel, AdminStatCard} from "@/components/admin/admin-primitives";
@@ -14,13 +14,13 @@ const SECTION_LINKS = [
   {
     suffix: "configs",
     label: "检测配置",
-    summary: "配置、模型、地址、开关。",
+    summary: "配置、模型、地址和开关。",
     icon: Boxes,
   },
   {
     suffix: "templates",
     label: "请求模板",
-    summary: "请求头和附加参数。",
+    summary: "复用请求头和附加参数。",
     icon: Layers3,
   },
   {
@@ -32,14 +32,8 @@ const SECTION_LINKS = [
   {
     suffix: "storage",
     label: "存储诊断",
-    summary: "后端状态和健康信息。",
+    summary: "后端数据库状态和健康信息。",
     icon: HardDrive,
-  },
-  {
-    suffix: "storage",
-    label: "Supabase 检查",
-    summary: "Supabase 环境和修复信息。",
-    icon: Database,
   },
   {
     suffix: "settings",
@@ -60,7 +54,7 @@ export default async function AdminOverviewPage({
   return (
     <div className="space-y-6">
       <section className="space-y-2 text-center">
-        <h1 className="text-3xl font-semibold tracking-[-0.05em] text-foreground sm:text-4xl">
+        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
           总览
         </h1>
         <p className="mx-auto max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">

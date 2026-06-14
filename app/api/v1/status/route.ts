@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { loadHistory } from "@/lib/database/history";
+import {
+  MAX_POINTS_PER_PROVIDER,
+  getDailyHistoryLimitPerConfig,
+  loadHistory,
+} from "@/lib/database/history";
 import { loadProviderConfigsFromDB } from "@/lib/database/config-loader";
+import {getStatusDayKey} from "@/lib/core/calendar-day";
 import { getPollingIntervalMs, getPollingIntervalLabel } from "@/lib/core/polling-config";
 import type { CheckResult, HealthStatus } from "@/lib/types";
 
@@ -13,6 +18,7 @@ interface ProviderStatistics {
   degradedCount: number;
   failedCount: number;
   validationFailedCount: number;
+  errorCount: number;
   successRate: number;
   avgLatencyMs: number | null;
   minLatencyMs: number | null;
@@ -29,7 +35,7 @@ interface ProviderStatus {
     status: HealthStatus;
     latencyMs: number | null;
     pingLatencyMs: number | null;
-    checkedAt: string;
+    checkedAt: string | null;
     message: string;
   } | null;
   statistics: ProviderStatistics;
@@ -48,6 +54,8 @@ interface StatusSummary {
   degraded: number;
   failed: number;
   validationFailed: number;
+  error: number;
+  pending: number;
   maintenance: number;
   avgLatencyMs: number | null;
 }
@@ -65,28 +73,72 @@ interface ApiResponse {
   };
 }
 
+const SUCCESS_STATUSES: ReadonlySet<HealthStatus> = new Set(["operational", "degraded"]);
+const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
+  "operational",
+  "degraded",
+  "failed",
+  "validation_failed",
+  "error",
+]);
+
+function createPendingLatest(config: {
+  name: string;
+}): ProviderStatus["latest"] {
+  return {
+    status: "pending",
+    latencyMs: null,
+    pingLatencyMs: null,
+    checkedAt: null,
+    message: `${config.name} is waiting for the first check result`,
+  };
+}
+
+function createMaintenanceLatest(config: {
+  name: string;
+}): ProviderStatus["latest"] {
+  return {
+    status: "maintenance",
+    latencyMs: null,
+    pingLatencyMs: null,
+    checkedAt: null,
+    message: `${config.name} is in maintenance mode`,
+  };
+}
+
+function getEmptyStatistics(): ProviderStatistics {
+  return {
+    totalChecks: 0,
+    operationalCount: 0,
+    degradedCount: 0,
+    failedCount: 0,
+    validationFailedCount: 0,
+    errorCount: 0,
+    successRate: 100,
+    avgLatencyMs: null,
+    minLatencyMs: null,
+    maxLatencyMs: null,
+  };
+}
+
 function computeStatistics(items: CheckResult[]): ProviderStatistics {
-  if (items.length === 0) {
-    return {
-      totalChecks: 0,
-      operationalCount: 0,
-      degradedCount: 0,
-      failedCount: 0,
-      validationFailedCount: 0,
-      successRate: 0,
-      avgLatencyMs: null,
-      minLatencyMs: null,
-      maxLatencyMs: null,
-    };
+  const todayKey = getStatusDayKey(new Date());
+  const todayItems = items.filter(
+    (item) => getStatusDayKey(item.checkedAt) === todayKey && COUNTED_STATUSES.has(item.status)
+  );
+
+  if (todayItems.length === 0) {
+    return getEmptyStatistics();
   }
 
   let operationalCount = 0;
   let degradedCount = 0;
   let failedCount = 0;
   let validationFailedCount = 0;
+  let errorCount = 0;
   const latencies: number[] = [];
 
-  for (const item of items) {
+  for (const item of todayItems) {
     switch (item.status) {
       case "operational":
         operationalCount++;
@@ -100,14 +152,17 @@ function computeStatistics(items: CheckResult[]): ProviderStatistics {
       case "validation_failed":
         validationFailedCount++;
         break;
+      case "error":
+        errorCount++;
+        break;
     }
     if (item.latencyMs !== null) {
       latencies.push(item.latencyMs);
     }
   }
 
-  const successCount = operationalCount + degradedCount;
-  const successRate = items.length > 0 ? (successCount / items.length) * 100 : 0;
+  const successCount = todayItems.filter((item) => SUCCESS_STATUSES.has(item.status)).length;
+  const successRate = (successCount / todayItems.length) * 100;
 
   let avgLatencyMs: number | null = null;
   let minLatencyMs: number | null = null;
@@ -120,11 +175,12 @@ function computeStatistics(items: CheckResult[]): ProviderStatistics {
   }
 
   return {
-    totalChecks: items.length,
+    totalChecks: todayItems.length,
     operationalCount,
     degradedCount,
     failedCount,
     validationFailedCount,
+    errorCount,
     successRate: Math.round(successRate * 100) / 100,
     avgLatencyMs,
     minLatencyMs,
@@ -143,7 +199,11 @@ export async function GET(request: NextRequest) {
   );
 
   const allowedIds = new Set(activeConfigs.map((cfg) => cfg.id));
-  const history = await loadHistory({ allowedIds });
+  const pollIntervalMs = getPollingIntervalMs();
+  const history = await loadHistory({
+    allowedIds,
+    limitPerConfig: getDailyHistoryLimitPerConfig(pollIntervalMs),
+  });
 
   const providers: ProviderStatus[] = [];
 
@@ -158,6 +218,18 @@ export async function GET(request: NextRequest) {
     const statistics = computeStatistics(items);
 
     const isMaintenance = maintenanceConfigIds.has(config.id);
+    const fallbackLatest = isMaintenance
+      ? createMaintenanceLatest(config)
+      : createPendingLatest(config);
+    const currentLatest = latest
+      ? {
+          status: isMaintenance ? "maintenance" : latest.status,
+          latencyMs: latest.latencyMs,
+          pingLatencyMs: latest.pingLatencyMs,
+          checkedAt: latest.checkedAt,
+          message: latest.message,
+        }
+      : fallbackLatest;
 
     providers.push({
       id: config.id,
@@ -165,17 +237,9 @@ export async function GET(request: NextRequest) {
       type: config.type,
       model: config.model,
       endpoint: config.endpoint,
-      latest: latest
-        ? {
-            status: isMaintenance ? "maintenance" : latest.status,
-            latencyMs: latest.latencyMs,
-            pingLatencyMs: latest.pingLatencyMs,
-            checkedAt: latest.checkedAt,
-            message: latest.message,
-          }
-        : null,
+      latest: currentLatest,
       statistics,
-      timeline: items.map((item) => ({
+      timeline: items.slice(0, MAX_POINTS_PER_PROVIDER).map((item) => ({
         status: isMaintenance ? "maintenance" : item.status,
         latencyMs: item.latencyMs,
         pingLatencyMs: item.pingLatencyMs,
@@ -189,6 +253,8 @@ export async function GET(request: NextRequest) {
   let summaryDegraded = 0;
   let summaryFailed = 0;
   let summaryValidationFailed = 0;
+  let summaryError = 0;
+  let summaryPending = 0;
   let summaryMaintenance = 0;
   const allLatencies: number[] = [];
 
@@ -208,6 +274,12 @@ export async function GET(request: NextRequest) {
       case "validation_failed":
         summaryValidationFailed++;
         break;
+      case "error":
+        summaryError++;
+        break;
+      case "pending":
+        summaryPending++;
+        break;
       case "maintenance":
         summaryMaintenance++;
         break;
@@ -224,6 +296,8 @@ export async function GET(request: NextRequest) {
     degraded: summaryDegraded,
     failed: summaryFailed,
     validationFailed: summaryValidationFailed,
+    error: summaryError,
+    pending: summaryPending,
     maintenance: summaryMaintenance,
     avgLatencyMs:
       allLatencies.length > 0
@@ -236,7 +310,7 @@ export async function GET(request: NextRequest) {
     summary,
     metadata: {
       generatedAt: new Date().toISOString(),
-      pollIntervalMs: getPollingIntervalMs(),
+      pollIntervalMs,
       pollIntervalLabel: getPollingIntervalLabel(),
       filters: {
         model: modelFilter,

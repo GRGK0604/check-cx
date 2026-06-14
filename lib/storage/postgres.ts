@@ -5,6 +5,8 @@ import {Pool, type QueryResultRow} from "pg";
 import {getErrorMessage} from "@/lib/utils";
 
 import {
+  CHECK_HISTORY_STATUS_SQL_LIST,
+  CHECK_HISTORY_STATUS_VALUES,
   createStorageId,
   getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
@@ -49,8 +51,6 @@ const capabilities: StorageCapabilities = {
   historySnapshots: true,
   availabilityStats: true,
   pollerLease: false,
-  runtimeMigrations: false,
-  supabaseDiagnostics: false,
   autoProvisionControlPlane: true,
 };
 
@@ -119,6 +119,40 @@ async function ensureColumnExists(pool: Pool, tableName: string, columnName: str
   await pool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
 }
 
+async function ensureCheckHistoryStatusConstraint(pool: Pool) {
+  const result = await pool.query<{definition: string | null}>(
+    `
+      SELECT pg_get_constraintdef(oid) AS definition
+      FROM pg_constraint
+      WHERE conrelid = 'check_history'::regclass
+        AND conname = 'check_history_status_valid'
+        AND contype = 'c'
+      LIMIT 1
+    `
+  );
+  const definition = result.rows[0]?.definition ?? "";
+  const isCurrent = CHECK_HISTORY_STATUS_VALUES.every((status) =>
+    definition.includes(`'${status}'`)
+  );
+
+  if (isCurrent) {
+    return;
+  }
+
+  await pool.query(`ALTER TABLE check_history DROP CONSTRAINT IF EXISTS check_history_status_valid`);
+  await pool.query(
+    `ALTER TABLE check_history ADD CONSTRAINT check_history_status_valid CHECK (status IN (${CHECK_HISTORY_STATUS_SQL_LIST})) NOT VALID`
+  );
+  try {
+    await pool.query(`ALTER TABLE check_history VALIDATE CONSTRAINT check_history_status_valid`);
+  } catch (error) {
+    console.warn(
+      "[modelhealthcheck] check_history 存在不符合当前状态枚举的旧数据，已保留 NOT VALID 约束以保护后续写入",
+      getErrorMessage(error)
+    );
+  }
+}
+
 export function createPostgresControlPlaneStorage(connectionString: string): ControlPlaneStorage {
   const pool = getPool(connectionString);
   let readyPromise: Promise<void> | null = null;
@@ -137,6 +171,7 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
         await pool.query(statement);
       }
 
+      await ensureCheckHistoryStatusConstraint(pool);
       await ensureColumnExists(pool, "site_settings", "site_icon_url", "text NOT NULL DEFAULT '/favicon.png'");
       await ensureColumnExists(pool, "site_settings", "admin_entry_path", "text NOT NULL DEFAULT '/admin'");
       await ensureColumnExists(
@@ -289,8 +324,8 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
     const limitClause =
       typeof limitPerConfig === "number"
         ? (() => {
-            params.unshift(limitPerConfig);
-            return `WHERE row_number <= $1`;
+            params.push(limitPerConfig);
+            return `WHERE row_number <= $${params.length}`;
           })()
         : "";
 

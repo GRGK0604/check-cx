@@ -1,6 +1,6 @@
 /**
  * 数据库表类型定义
- * 对应 Supabase 的 check_configs 和 check_history 表
+ * 对应当前后端数据库的 check_configs 和 check_history 表
  */
 
 /**

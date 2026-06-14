@@ -20,16 +20,18 @@ export async function GET(request: Request) {
   const bypassCacheParam = searchParams.get("bypassCache");
   const forceRefreshRequested =
     forceRefreshParam === "1" || forceRefreshParam === "true";
-  const adminSession = forceRefreshRequested ? await getAdminSession() : null;
-  const shouldForceRefresh = forceRefreshRequested && Boolean(adminSession);
-  const shouldBypassCache =
+  const bypassCacheRequested =
     bypassCacheParam === "1" || bypassCacheParam === "true";
+  const adminSession =
+    forceRefreshRequested || bypassCacheRequested ? await getAdminSession() : null;
+  const shouldForceRefresh = forceRefreshRequested && Boolean(adminSession);
+  const shouldBypassCache = bypassCacheRequested && Boolean(adminSession);
   const trendPeriod = VALID_PERIODS.includes(period as AvailabilityPeriod)
     ? (period as AvailabilityPeriod)
     : undefined;
 
   const { data, etag } = await loadDashboardDataWithEtag({
-    refreshMode: shouldForceRefresh ? "always" : "never",
+    refreshMode: shouldForceRefresh ? "always" : "missing",
     trendPeriod,
     bypassCache: shouldBypassCache,
   });

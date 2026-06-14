@@ -10,7 +10,7 @@ import type {
 } from "@/lib/types/database";
 import type {CheckResult} from "@/lib/types/check";
 
-export type DatabaseProvider = "supabase" | "postgres" | "sqlite";
+export type DatabaseProvider = "postgres" | "sqlite";
 
 export interface StorageCapabilities {
   provider: DatabaseProvider;
@@ -22,8 +22,6 @@ export interface StorageCapabilities {
   historySnapshots: boolean;
   availabilityStats: boolean;
   pollerLease: boolean;
-  runtimeMigrations: boolean;
-  supabaseDiagnostics: boolean;
   autoProvisionControlPlane: boolean;
 }
 

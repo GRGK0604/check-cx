@@ -4,7 +4,6 @@ import path from "node:path";
 
 import {getErrorMessage} from "@/lib/utils";
 
-import {getManagedStorageRuntimeOverride} from "./bootstrap-store";
 import {
   createPostgresControlPlaneStorage,
   resetPostgresControlPlaneStorageCache,
@@ -13,7 +12,6 @@ import {
   createSqliteControlPlaneStorage,
   resetSqliteControlPlaneStorageCache,
 } from "./sqlite";
-import {createSupabaseControlPlaneStorage} from "./supabase";
 import type {ControlPlaneStorage, DatabaseProvider, StorageCapabilities} from "./types";
 
 const DEFAULT_SQLITE_RELATIVE_PATH = path.join(".sisyphus", "local-data", "app.db");
@@ -56,26 +54,11 @@ function normalizeEnv(value: string | undefined): string | null {
 }
 
 function isDatabaseProvider(value: string | null): value is DatabaseProvider {
-  return value === "supabase" || value === "postgres" || value === "sqlite";
-}
-
-function hasSupabaseStorageConfig(): boolean {
-  return Boolean(
-    normalizeEnv(process.env.SUPABASE_URL) && normalizeEnv(process.env.SUPABASE_SERVICE_ROLE_KEY)
-  );
+  return value === "postgres" || value === "sqlite";
 }
 
 function hasExplicitDatabaseProvider(): boolean {
   return Boolean(normalizeEnv(process.env.DATABASE_PROVIDER));
-}
-
-function hasAnyRemoteBackendConfigured(): boolean {
-  const managedOverride = getManagedStorageRuntimeOverride();
-  return Boolean(
-    hasSupabaseStorageConfig() ||
-      getDirectPostgresConnectionState().connectionString ||
-      managedOverride?.postgresConnectionString
-  );
 }
 
 export function getDirectPostgresConnectionState(): DirectPostgresConnectionState {
@@ -83,7 +66,6 @@ export function getDirectPostgresConnectionState(): DirectPostgresConnectionStat
     ["DATABASE_URL", process.env.DATABASE_URL],
     ["POSTGRES_URL", process.env.POSTGRES_URL],
     ["POSTGRES_PRISMA_URL", process.env.POSTGRES_PRISMA_URL],
-    ["SUPABASE_DB_URL", process.env.SUPABASE_DB_URL],
   ] as const;
 
   for (const [source, rawValue] of candidates) {
@@ -112,23 +94,6 @@ function getSqliteFilePath(): string {
 }
 
 function getCapabilities(provider: DatabaseProvider): StorageCapabilities {
-  if (provider === "supabase") {
-    return {
-      provider,
-      adminAuth: true,
-      siteSettings: true,
-      controlPlaneCrud: true,
-      requestTemplates: true,
-      notifications: true,
-      historySnapshots: true,
-      availabilityStats: true,
-      pollerLease: true,
-      runtimeMigrations: true,
-      supabaseDiagnostics: true,
-      autoProvisionControlPlane: false,
-    };
-  }
-
   return {
     provider,
     adminAuth: true,
@@ -139,8 +104,6 @@ function getCapabilities(provider: DatabaseProvider): StorageCapabilities {
     historySnapshots: true,
     availabilityStats: true,
     pollerLease: false,
-    runtimeMigrations: false,
-    supabaseDiagnostics: false,
     autoProvisionControlPlane: true,
   };
 }
@@ -180,35 +143,18 @@ export function resolveDatabaseBackend(): ResolvedDatabaseBackend {
 
   const explicitProvider = normalizeEnv(process.env.DATABASE_PROVIDER);
   const postgres = getDirectPostgresConnectionState();
-  const managedOverride = getManagedStorageRuntimeOverride();
   const sqliteFilePath = getSqliteFilePath();
 
   let provider: DatabaseProvider;
-  let backupProvider: DatabaseProvider | null = null;
   let reason: string;
-  let postgresConnectionString = postgres.connectionString;
-  let postgresConnectionSource = postgres.source;
 
-  if (managedOverride) {
-    provider = managedOverride.primaryProvider;
-    backupProvider = managedOverride.backupProvider === "none" ? null : managedOverride.backupProvider;
-    reason = `managed:${managedOverride.primaryProvider}:generation:${managedOverride.activationGeneration}`;
-    if (managedOverride.postgresConnectionString) {
-      postgresConnectionString = managedOverride.postgresConnectionString;
-      postgresConnectionSource = "managed:bootstrap";
-    }
-  } else if (explicitProvider) {
+  if (explicitProvider) {
     if (!isDatabaseProvider(explicitProvider)) {
-      throw new Error(
-        "DATABASE_PROVIDER 仅支持 supabase、postgres 或 sqlite"
-      );
+      throw new Error("DATABASE_PROVIDER 仅支持 postgres 或 sqlite");
     }
 
     provider = explicitProvider;
     reason = `explicit:${explicitProvider}`;
-  } else if (hasSupabaseStorageConfig()) {
-    provider = "supabase";
-    reason = "env:supabase";
   } else if (postgres.connectionString) {
     provider = "postgres";
     reason = `env:${postgres.source}`;
@@ -219,13 +165,13 @@ export function resolveDatabaseBackend(): ResolvedDatabaseBackend {
 
   backendCache = {
     provider,
-    backupProvider,
+    backupProvider: null,
     capabilities: getCapabilities(provider),
     reason,
-    postgresConnectionString,
-    postgresConnectionSource,
+    postgresConnectionString: postgres.connectionString,
+    postgresConnectionSource: postgres.source,
     sqliteFilePath,
-    managedActivationGeneration: managedOverride?.activationGeneration ?? null,
+    managedActivationGeneration: null,
   };
 
   return backendCache;
@@ -293,120 +239,17 @@ export async function getControlPlaneStorage(): Promise<ControlPlaneStorage> {
           backend.postgresConnectionString ??
             (() => {
               throw new Error(
-                "当前选择 postgres 存储，但未配置 DATABASE_URL / POSTGRES_URL / SUPABASE_DB_URL"
+                "当前选择 postgres 存储，但未配置 DATABASE_URL / POSTGRES_URL / POSTGRES_PRISMA_URL"
               );
             })()
         );
 
-      const createStorageFor = (provider: DatabaseProvider): ControlPlaneStorage => {
-        if (provider === "supabase") {
-          return createSupabaseControlPlaneStorage();
-        }
-        if (provider === "postgres") {
-          return createPostgresStorage();
-        }
-        return createSqliteControlPlaneStorage(backend.sqliteFilePath);
-      };
-
       try {
-        if (backend.reason.startsWith("managed:")) {
-          const managedResolution = createRuntimeResolution({
-            preferredProvider: backend.provider,
-            preferredReason: backend.reason,
-            activeProvider: backend.provider,
-            activeReason: `managed-primary:${backend.provider}`,
-            isFailover: false,
-            isBlocked: false,
-            failoverError: null,
-            postgresConnectionSource: backend.postgresConnectionSource,
-            sqliteFilePath: backend.sqliteFilePath,
-          });
-
-          try {
-            return await finalize(createStorageFor(backend.provider), managedResolution);
-          } catch (error) {
-            failBlockedResolution(
-              createRuntimeResolution({
-                ...managedResolution,
-                activeReason: `blocked:${backend.provider}`,
-              }),
-              createBlockedInitializationError(
-                `托管主后端 ${backend.provider} 初始化失败；当前单主模型不会自动切到备用后端`,
-                error
-              )
-            );
-          }
-        }
-
-        if (hasExplicitDatabaseProvider()) {
-          const storage = createStorageFor(backend.provider);
-
-          try {
-            return await finalize(storage, primaryResolution);
-          } catch (error) {
-            failBlockedResolution(primaryResolution, error);
-          }
-        }
-
-        if (backend.provider === "supabase" && backend.postgresConnectionString) {
-          try {
-            return await finalize(createSupabaseControlPlaneStorage(), createRuntimeResolution({
-              preferredProvider: "supabase",
-              preferredReason: backend.reason,
-              activeProvider: "supabase",
-              activeReason: "primary:supabase",
-              isFailover: false,
-              isBlocked: false,
-              failoverError: null,
-              postgresConnectionSource: backend.postgresConnectionSource,
-              sqliteFilePath: backend.sqliteFilePath,
-            }));
-          } catch (supabaseError) {
-            const failoverError = getErrorMessage(supabaseError);
-            const failoverResolution = createRuntimeResolution({
-              preferredProvider: "supabase",
-              preferredReason: backend.reason,
-              activeProvider: "postgres",
-              activeReason: `failover:postgres:${backend.postgresConnectionSource ?? "direct"}`,
-              isFailover: true,
-              isBlocked: false,
-              failoverError,
-              postgresConnectionSource: backend.postgresConnectionSource,
-              sqliteFilePath: backend.sqliteFilePath,
-            });
-
-            try {
-              return await finalize(createPostgresStorage(), failoverResolution);
-            } catch (postgresError) {
-              failBlockedResolution(
-                createRuntimeResolution({
-                  ...failoverResolution,
-                  failoverError: `主后端失败：${failoverError}；Postgres 兜底也失败：${getErrorMessage(postgresError)}`,
-                }),
-                createBlockedInitializationError(
-                  "Supabase 初始化失败，且 Postgres 兜底也不可用，当前不会自动回退到 SQLite",
-                  postgresError
-                )
-              );
-            }
-          }
-        }
-
-        if (backend.provider === "supabase" && hasAnyRemoteBackendConfigured()) {
-          try {
-            return await finalize(createSupabaseControlPlaneStorage(), primaryResolution);
-          } catch (error) {
-            failBlockedResolution(
-              createRuntimeResolution({
-                ...primaryResolution,
-                activeReason: "blocked:supabase",
-              }),
-              createBlockedInitializationError(
-                "Supabase 初始化失败，且未配置可用的 Postgres 兜底，因此不会自动回退到 SQLite",
-                error
-              )
-            );
-          }
+        if (hasExplicitDatabaseProvider() && backend.provider === "sqlite") {
+          return await finalize(
+            createSqliteControlPlaneStorage(backend.sqliteFilePath),
+            primaryResolution
+          );
         }
 
         if (backend.provider === "postgres") {
@@ -426,17 +269,20 @@ export async function getControlPlaneStorage(): Promise<ControlPlaneStorage> {
           }
         }
 
-        return await finalize(createSqliteControlPlaneStorage(backend.sqliteFilePath), createRuntimeResolution({
-          preferredProvider: "sqlite",
-          preferredReason: backend.reason,
-          activeProvider: "sqlite",
-          activeReason: backend.reason,
-          isFailover: false,
-          isBlocked: false,
-          failoverError: null,
-          postgresConnectionSource: backend.postgresConnectionSource,
-          sqliteFilePath: backend.sqliteFilePath,
-        }));
+        return await finalize(
+          createSqliteControlPlaneStorage(backend.sqliteFilePath),
+          createRuntimeResolution({
+            preferredProvider: "sqlite",
+            preferredReason: backend.reason,
+            activeProvider: "sqlite",
+            activeReason: backend.reason,
+            isFailover: false,
+            isBlocked: false,
+            failoverError: null,
+            postgresConnectionSource: backend.postgresConnectionSource,
+            sqliteFilePath: backend.sqliteFilePath,
+          })
+        );
       } catch (error) {
         throw error;
       }
