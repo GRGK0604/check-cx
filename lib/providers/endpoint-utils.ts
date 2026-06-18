@@ -1,6 +1,6 @@
 import type {ProviderType} from "@/lib/types";
 
-const OPENAI_ENDPOINT_REGEX = /\/(chat\/completions|responses)\/?$/i;
+const OPENAI_ENDPOINT_REGEX = /\/(chat\/completions|responses|images\/generations)\/?$/i;
 const ANTHROPIC_ENDPOINT_REGEX = /\/messages\/?$/i;
 
 function parseEndpoint(endpoint: string): URL {
@@ -17,6 +17,20 @@ function normalizeOpenAiPath(pathname: string): string {
     .replace(/\/chat\/completion(?=\/|$)/i, "/chat/completions");
 }
 
+export function isOpenAiImageGenerationEndpoint(endpoint: string | null | undefined): boolean {
+  if (!endpoint) return false;
+
+  let pathname: string;
+  try {
+    pathname = parseEndpoint(endpoint).pathname;
+  } catch {
+    const [pathWithoutQuery] = endpoint.split("?");
+    pathname = pathWithoutQuery;
+  }
+
+  return /\/images\/generations\/?$/.test(normalizeOpenAiPath(pathname));
+}
+
 export function normalizeProviderEndpoint(type: ProviderType, endpoint: string): string {
   const trimmed = endpoint.trim();
   if (!trimmed) {
@@ -28,7 +42,9 @@ export function normalizeProviderEndpoint(type: ProviderType, endpoint: string):
   if (type === "openai") {
     parsed.pathname = normalizeOpenAiPath(parsed.pathname);
     if (!OPENAI_ENDPOINT_REGEX.test(parsed.pathname)) {
-      throw new Error("OpenAI 接口地址必须以 /v1/chat/completions 或 /v1/responses 结尾");
+      throw new Error(
+        "OpenAI 接口地址必须以 /v1/chat/completions、/v1/responses 或 /v1/images/generations 结尾"
+      );
     }
   }
 

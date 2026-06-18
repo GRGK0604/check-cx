@@ -99,7 +99,10 @@ export default async function AdminConfigsPage({
               />
             </AdminField>
 
-            <AdminField label="接口地址" description="保存时会自动纠正常见格式问题。">
+            <AdminField
+              label="接口地址"
+              description="OpenAI 支持 /v1/chat/completions、/v1/responses 和 /v1/images/generations。图片端点会真实生成并消耗额度/费用，不自动重试，不保存图片。"
+            >
               <AdminInput
                 name="endpoint"
                 placeholder="https://api.openai.com/v1/responses"
@@ -131,7 +134,10 @@ export default async function AdminConfigsPage({
               />
             </AdminField>
 
-            <AdminField label="附加参数(JSON)">
+            <AdminField
+              label="附加参数(JSON)"
+              description="图片生成检测可填写 size、n、prompt、response_format 等参数；model 仍以模型字段为准。"
+            >
               <AdminTextarea
                 name="metadata"
                 placeholder='{"region": "global", "tier": "paid"}'
@@ -311,7 +317,10 @@ export default async function AdminConfigsPage({
                 />
               </AdminField>
 
-              <AdminField label="接口地址">
+              <AdminField
+                label="接口地址"
+                description="OpenAI 图片端点 /v1/images/generations 会执行一次真实生成检测并消耗额度/费用，不自动重试，不保存图片。"
+              >
                 <AdminInput name="endpoint" defaultValue={editingConfig.endpoint} required />
               </AdminField>
 
@@ -338,7 +347,10 @@ export default async function AdminConfigsPage({
                   defaultValue={formatJson(editingConfig.request_header)}
                 />
               </AdminField>
-              <AdminField label="附加参数(JSON)">
+              <AdminField
+                label="附加参数(JSON)"
+                description="图片生成检测可填写 size、n、prompt、response_format 等参数；model 仍以模型字段为准。"
+              >
                 <AdminTextarea
                   name="metadata"
                   defaultValue={formatJson(editingConfig.metadata)}

@@ -5,7 +5,8 @@
 import pLimit from "p-limit";
 import type { CheckResult, ProviderConfig } from "../types";
 import { getErrorMessage, getSanitizedErrorDetail, logError } from "../utils";
-import { checkWithAiSdk } from "./ai-sdk-check";
+import { checkWithAiSdk, IMAGE_GENERATION_TIMEOUT_MS } from "./ai-sdk-check";
+import { isOpenAiImageGenerationEndpoint, normalizeProviderEndpoint } from "./endpoint-utils";
 import { getCheckConcurrency } from "../core/polling-config";
 
 // 最多尝试 3 次：初始一次 + 2 次重试
@@ -117,11 +118,42 @@ function shouldRetryTransientFailure(...messages: Array<string | undefined>): bo
   return TRANSIENT_FAILURE_PATTERN.test(combined);
 }
 
+function isImageGenerationConfig(config: ProviderConfig): boolean {
+  const endpoint = config.endpoint || "";
+  if (config.type !== "openai") {
+    return false;
+  }
+
+  try {
+    const normalizedEndpoint = normalizeProviderEndpoint(config.type, endpoint);
+    return isOpenAiImageGenerationEndpoint(normalizedEndpoint);
+  } catch {
+    return false;
+  }
+}
+
+export function getProviderCheckAttemptTimeoutMs(config: ProviderConfig): number {
+  return isImageGenerationConfig(config)
+    ? IMAGE_GENERATION_TIMEOUT_MS
+    : PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS;
+}
+
+function getProviderMaxRequestAbortRetries(config: ProviderConfig): number {
+  if (isImageGenerationConfig(config)) {
+    return 0;
+  }
+
+  return MAX_REQUEST_ABORT_RETRIES;
+}
+
 async function checkWithRetry(
   config: ProviderConfig,
   options?: ProviderCheckExecutionOptions
 ): Promise<CheckResult> {
-  for (let attempt = 0; attempt <= MAX_REQUEST_ABORT_RETRIES; attempt += 1) {
+  const attemptTimeoutMs = getProviderCheckAttemptTimeoutMs(config);
+  const maxRetries = getProviderMaxRequestAbortRetries(config);
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     throwIfAborted(options?.signal, `${config.name} 检测已取消`);
 
     try {
@@ -131,14 +163,14 @@ async function checkWithRetry(
             abortSignal: attemptSignal,
             propagateAbort: true,
           }),
-        PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS,
+        attemptTimeoutMs,
         `${config.name} 第 ${attempt + 1} 次检测`,
         options
       );
       if (
         (result.status === "failed" || result.status === "error") &&
         shouldRetryTransientFailure(result.message, result.logMessage) &&
-        attempt < MAX_REQUEST_ABORT_RETRIES
+        attempt < maxRetries
       ) {
         console.warn(
           `[check-cx] ${config.name} 请求异常（${result.message}），正在重试第 ${
@@ -156,7 +188,7 @@ async function checkWithRetry(
       const message = getErrorMessage(error);
       if (
         shouldRetryTransientFailure(message) &&
-        attempt < MAX_REQUEST_ABORT_RETRIES
+        attempt < maxRetries
       ) {
         console.warn(
           `[check-cx] ${config.name} 请求异常（${message}），正在重试第 ${

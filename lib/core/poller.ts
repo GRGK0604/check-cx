@@ -7,11 +7,11 @@ import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {invalidateDashboardCache} from "./dashboard-data";
 import {clearPingCache} from "./global-state";
 import {runProviderChecksAndPersist} from "./health-snapshot-service";
-import {getCheckConcurrency, getPollingIntervalMs} from "./polling-config";
+import {getPollingIntervalMs} from "./polling-config";
 import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTimer,} from "./global-state";
 import {startOfficialStatusPoller} from "./official-status-poller";
-import type {CheckResult, HealthStatus} from "../types";
-import {PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS, PROVIDER_CHECK_MAX_ATTEMPTS} from "../providers";
+import type {CheckResult, HealthStatus, ProviderConfig} from "../types";
+import {getProviderCheckAttemptTimeoutMs, PROVIDER_CHECK_MAX_ATTEMPTS} from "../providers";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
 const FAILURE_STATUSES: ReadonlySet<HealthStatus> = new Set([
@@ -109,16 +109,18 @@ function requestRecoveryTick(reason: string): void {
     });
 }
 
-function getTickBudgetMs(configCount: number): number {
-  if (configCount <= 0) {
+function getTickBudgetMs(configs: ProviderConfig[]): number {
+  if (configs.length <= 0) {
     return POLLER_STARTUP_BUDGET_MS;
   }
 
-  const concurrency = getCheckConcurrency();
-  const batches = Math.max(1, Math.ceil(configCount / concurrency));
-  const maxSingleConfigDurationMs =
-    PROVIDER_CHECK_ATTEMPT_TIMEOUT_MS * PROVIDER_CHECK_MAX_ATTEMPTS;
-  return batches * maxSingleConfigDurationMs + POLLER_FLUSH_BUFFER_MS;
+  const totalWorstCaseDurationMs = configs.reduce(
+    (total, config) =>
+      total + getProviderCheckAttemptTimeoutMs(config) * PROVIDER_CHECK_MAX_ATTEMPTS,
+    0
+  );
+
+  return totalWorstCaseDurationMs + POLLER_FLUSH_BUFFER_MS;
 }
 
 function isTickCurrent(tickRunId: number, signal: AbortSignal): boolean {
@@ -205,7 +207,7 @@ async function tick() {
 
     // 过滤掉维护中的配置
     const configs = allConfigs.filter((cfg) => !cfg.is_maintenance);
-    activeTickBudgetMs = getTickBudgetMs(configs.length);
+    activeTickBudgetMs = getTickBudgetMs(configs);
 
     if (configs.length === 0) {
       return;

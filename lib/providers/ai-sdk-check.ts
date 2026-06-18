@@ -27,7 +27,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { CheckResult, HealthStatus, ProviderConfig } from "../types";
 import { DEFAULT_ENDPOINTS } from "../types";
 import { getSanitizedErrorDetail } from "../utils";
-import { normalizeProviderEndpoint } from "./endpoint-utils";
+import { isOpenAiImageGenerationEndpoint, normalizeProviderEndpoint } from "./endpoint-utils";
 import { generateChallenge, validateResponse } from "./challenge";
 import { measureEndpointPing } from "./endpoint-ping";
 
@@ -38,15 +38,21 @@ import { measureEndpointPing } from "./endpoint-ping";
 /** 默认超时时间（毫秒）- 45 秒，兼顾慢速模型的首次响应 */
 const DEFAULT_TIMEOUT_MS = 45_000;
 
-/** 性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
-const DEGRADED_THRESHOLD_MS = 6_000;
+/** 文本检测性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
+const TEXT_DEGRADED_THRESHOLD_MS = 10_000;
+export const IMAGE_GENERATION_OPERATIONAL_THRESHOLD_MS = 80_000;
+export const IMAGE_GENERATION_TIMEOUT_MS = 90_000;
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
 const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
 const INTERNAL_METADATA_KEYS = new Set(["checkCx"]);
+const IMAGE_GENERATION_RESERVED_METADATA_KEYS = new Set([
+  "model",
+  "abortSignal",
+]);
 
 /** 用于从完整端点 URL 中提取 baseURL 的正则表达式 */
-const API_PATH_SUFFIX_REGEX = /\/(chat\/completions|responses|messages)\/?$/;
+const API_PATH_SUFFIX_REGEX = /\/(chat\/completions|responses|images\/generations|messages)\/?$/;
 
 /** 原生 Gemini 端点识别正则：包含 /models/ 且以 :generateContent 或 :streamGenerateContent 结尾 */
 const GOOGLE_GENERATIVE_API_REGEX = /\/v\d+\w*\/models\/[^/:]+:(generateContent|streamGenerateContent)\/?$/;
@@ -262,6 +268,21 @@ function filterMetadata(
   return Object.keys(filtered).length > 0 ? filtered : null;
 }
 
+function filterImageGenerationMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): Record<string, unknown> | null {
+  if (!metadata) return null;
+
+  const filtered = Object.fromEntries(
+    Object.entries(metadata).filter(
+      ([key]) =>
+        !IMAGE_GENERATION_RESERVED_METADATA_KEYS.has(key) && !INTERNAL_METADATA_KEYS.has(key)
+    )
+  );
+
+  return Object.keys(filtered).length > 0 ? filtered : null;
+}
+
 /**
  * 创建自定义 fetch 函数
  *
@@ -305,6 +326,127 @@ function createCustomFetch(
       return fetch(requestInput, { ...init, headers: mergedHeaders });
     }
   };
+}
+
+interface ImageGenerationResponse {
+  data?: Array<{
+    url?: string;
+    b64_json?: string;
+    revised_prompt?: string;
+  }>;
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+  };
+}
+
+function getResponseErrorMessage(response: Response, bodyText: string): string {
+  if (!bodyText) {
+    return `[${response.status}] ${response.statusText || "请求失败"}`;
+  }
+
+  try {
+    const parsed = JSON.parse(bodyText) as ImageGenerationResponse;
+    const message = parsed.error?.message;
+    if (message) {
+      return `[${response.status}] ${message}`;
+    }
+  } catch {
+    // Fall through to the raw body preview below.
+  }
+
+  return `[${response.status}] ${bodyText.slice(0, 300)}`;
+}
+
+function getResponseErrorDetail(response: Response, bodyText: string): string {
+  return JSON.stringify(
+    {
+      status: response.status,
+      statusText: response.statusText,
+      bodyPreview: bodyText.slice(0, 1000),
+    },
+    null,
+    2
+  );
+}
+
+async function checkImageGenerationEndpoint(
+  resolveParams: () => Promise<ResultBuilderParams>,
+  config: ProviderConfig,
+  endpoint: string,
+  abortSignal: AbortSignal
+): Promise<CheckResult> {
+  const headers = new Headers({
+    Authorization: `Bearer ${config.apiKey}`,
+    "Content-Type": "application/json",
+    "User-Agent": "check-cx/0.1.0",
+    ...config.requestHeaders,
+  });
+  const requestUrl = mergeEndpointQueryParams(endpoint, endpoint);
+  // Do not force response_format: GPT image models commonly return b64_json by default.
+  const requestBody = {
+    model: config.model,
+    prompt: "simple green square status check",
+    n: 1,
+    size: "1024x1024",
+    ...filterImageGenerationMetadata(config.metadata),
+  };
+
+  const requestStartedAt = Date.now();
+  const response = await fetch(requestUrl, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody),
+    signal: abortSignal,
+  });
+
+  // The image response is parsed only in memory to verify shape; it is never persisted.
+  const bodyText = await response.text();
+
+  if (!response.ok) {
+    const latencyMs = Date.now() - requestStartedAt;
+    return buildCheckResult(
+      await resolveParams(),
+      "error",
+      latencyMs,
+      getResponseErrorMessage(response, bodyText),
+      getResponseErrorDetail(response, bodyText)
+    );
+  }
+
+  let parsed: ImageGenerationResponse;
+  try {
+    parsed = JSON.parse(bodyText) as ImageGenerationResponse;
+  } catch (error) {
+    return buildCheckResult(
+      await resolveParams(),
+      "validation_failed",
+      Date.now() - requestStartedAt,
+      "图片生成响应不是合法 JSON",
+      getSanitizedErrorDetail(error)
+    );
+  }
+
+  const image = parsed.data?.find((item) => item.url || item.b64_json);
+  if (!image) {
+    return buildCheckResult(
+      await resolveParams(),
+      "validation_failed",
+      Date.now() - requestStartedAt,
+      "图片生成响应中没有图片 URL 或 b64_json"
+    );
+  }
+
+  const latencyMs = Date.now() - requestStartedAt;
+  const status: HealthStatus =
+    latencyMs <= IMAGE_GENERATION_OPERATIONAL_THRESHOLD_MS ? "operational" : "degraded";
+  const message =
+    status === "degraded"
+      ? `图片生成成功但耗时 ${latencyMs}ms`
+      : `图片生成验证通过 (${latencyMs}ms)`;
+
+  return buildCheckResult(await resolveParams(), status, latencyMs, message);
 }
 
 /* ============================================================================
@@ -517,8 +659,9 @@ function buildCheckResult(
  * 4. 根据延迟和验证结果判定健康状态
  *
  * 状态判定规则：
- * - operational：请求成功、验证通过、延迟 ≤ 6000ms
- * - degraded：请求成功、验证通过、延迟 > 6000ms
+ * - operational：请求成功、验证通过、延迟 ≤ 10000ms
+ * - degraded：请求成功、验证通过、延迟 > 10000ms
+ * - /v1/images/generations：执行一次真实图片生成，80 秒内为 operational
  * - validation_failed：收到回复但答案验证失败
  * - failed：请求失败、超时或回复为空
  * - error：请求过程中发生异常
@@ -529,12 +672,18 @@ export async function checkWithAiSdk(
 ): Promise<CheckResult> {
   const controller = new AbortController();
   let abortListenerCleanup: (() => void) | null = null;
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
   const startedAt = Date.now();
 
   const displayEndpoint = config.endpoint || DEFAULT_ENDPOINTS[config.type];
+  const normalizedEndpoint = normalizeProviderEndpoint(
+    config.type,
+    displayEndpoint
+  );
+  const isImageGenerationCheck =
+    config.type === "openai" && isOpenAiImageGenerationEndpoint(normalizedEndpoint);
+  const timeoutMs = isImageGenerationCheck ? IMAGE_GENERATION_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const pingPromise = measureEndpointPing(displayEndpoint);
-  const challenge = generateChallenge(config.metadata);
 
   // 构建结果参数的辅助函数
   const buildParams = async (): Promise<ResultBuilderParams> => ({
@@ -562,6 +711,16 @@ export async function checkWithAiSdk(
   }
 
   try {
+    if (isImageGenerationCheck) {
+      return await checkImageGenerationEndpoint(
+        buildParams,
+        config,
+        normalizedEndpoint,
+        controller.signal
+      );
+    }
+
+    const challenge = generateChallenge(config.metadata);
     const { model, reasoningEffort } = createModel(config);
 
     // 仅 OpenAI 推理模型需要 providerOptions
@@ -661,7 +820,8 @@ export async function checkWithAiSdk(
     }
 
     // 判定健康状态
-    const status: HealthStatus = latencyMs <= DEGRADED_THRESHOLD_MS ? "operational" : "degraded";
+    const status: HealthStatus =
+      latencyMs <= TEXT_DEGRADED_THRESHOLD_MS ? "operational" : "degraded";
     const message =
       status === "degraded"
         ? completionLatencyMs > latencyMs
