@@ -92,6 +92,7 @@ export interface SiteSettingsRow {
   admin_console_description: string;
   admin_entry_path: string;
   telegram_notification_name: string;
+  monitor_started_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }

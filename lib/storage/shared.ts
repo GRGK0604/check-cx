@@ -114,6 +114,7 @@ export const POSTGRES_CONTROL_PLANE_SCHEMA_STATEMENTS = [
       admin_console_description text NOT NULL,
       admin_entry_path text NOT NULL DEFAULT '/admin',
       telegram_notification_name text NOT NULL DEFAULT 'RKAPI模型监控',
+      monitor_started_at timestamptz,
       created_at timestamptz NOT NULL DEFAULT timezone('utc', now()),
       updated_at timestamptz NOT NULL DEFAULT timezone('utc', now())
     )
@@ -267,6 +268,7 @@ export const SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS = [
       admin_console_description text NOT NULL,
       admin_entry_path text NOT NULL DEFAULT '/admin',
       telegram_notification_name text NOT NULL DEFAULT 'RKAPI模型监控',
+      monitor_started_at text,
       created_at text NOT NULL,
       updated_at text NOT NULL
     )
@@ -595,6 +597,7 @@ export function mapSiteSettingsRow(row: LooseRow): SiteSettingsRow {
     telegram_notification_name:
       toRequiredString(row.telegram_notification_name) ||
       DEFAULT_SITE_SETTINGS.telegramNotificationName,
+    monitor_started_at: toOptionalString(row.monitor_started_at),
     created_at: toOptionalString(row.created_at) ?? undefined,
     updated_at: toOptionalString(row.updated_at) ?? undefined,
   };

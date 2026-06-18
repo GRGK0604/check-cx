@@ -8,6 +8,9 @@
  */
 import {loadProviderConfigsFromDB} from "../database/config-loader";
 import {getDailyHistoryLimitPerConfig} from "../database/history";
+import {getControlPlaneStorage} from "../storage/resolver";
+import {SITE_SETTINGS_SINGLETON_KEY} from "../types/site-settings";
+import {getStatusDayKey} from "./calendar-day";
 import {getPollingIntervalLabel, getPollingIntervalMs} from "./polling-config";
 import {ensureOfficialStatusPoller} from "./official-status-poller";
 import {ensureCheckPoller} from "./poller";
@@ -44,6 +47,8 @@ export function resetDashboardCacheMetrics(): void {
 }
 
 const DEFAULT_DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000;
+const MONITORED_DAYS_BASELINE = 67;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const dashboardCache = new Map<string, DashboardCacheEntry>();
 
 export function invalidateDashboardCache(): void {
@@ -103,10 +108,49 @@ function getEmptyDashboardData(trendPeriod: AvailabilityPeriod): DashboardLoadRe
     pollIntervalLabel: getPollingIntervalLabel(),
     pollIntervalMs,
     trendPeriod,
+    monitoredDays: MONITORED_DAYS_BASELINE,
     generatedAt: Date.now(),
   };
 
   return {data, etag: buildDashboardEtag(data)};
+}
+
+function getDayNumber(value: Date | string): number {
+  const dayKey = getStatusDayKey(value);
+  const [year, month, day] = dayKey.split("-").map(Number);
+  if (!year || !month || !day) {
+    return Number.NaN;
+  }
+
+  return Math.floor(Date.UTC(year, month - 1, day) / DAY_MS);
+}
+
+async function getMonitoredDays(now: Date = new Date()): Promise<number> {
+  const storage = await getControlPlaneStorage();
+  const settings = await storage.siteSettings.getSingleton(SITE_SETTINGS_SINGLETON_KEY);
+  let startedAt = settings?.monitor_started_at ?? null;
+
+  if (!startedAt) {
+    const earliestCheckedAt = await storage.runtime.history.getEarliestCheckedAt();
+    if (earliestCheckedAt) {
+      startedAt = await storage.siteSettings.setMonitorStartedAtIfEmpty(
+        SITE_SETTINGS_SINGLETON_KEY,
+        earliestCheckedAt
+      );
+    }
+  }
+
+  if (!startedAt) {
+    return MONITORED_DAYS_BASELINE;
+  }
+
+  const startedDay = getDayNumber(startedAt);
+  const currentDay = getDayNumber(now);
+  if (!Number.isFinite(startedDay) || !Number.isFinite(currentDay)) {
+    return MONITORED_DAYS_BASELINE;
+  }
+
+  return MONITORED_DAYS_BASELINE + Math.max(0, currentDay - startedDay);
 }
 
 export interface DashboardLoadResult {
@@ -188,6 +232,7 @@ async function loadDashboardDataInternal(options?: {
     );
 
     const providerTimelines = buildProviderTimelines(history, maintenanceConfigs, activeConfigs);
+    const monitoredDays = await getMonitoredDays();
 
     let lastUpdated: string | null = null;
     let lastUpdatedMs = 0;
@@ -214,6 +259,7 @@ async function loadDashboardDataInternal(options?: {
       pollIntervalLabel,
       pollIntervalMs,
       trendPeriod,
+      monitoredDays,
       generatedAt,
     };
 

@@ -299,6 +299,7 @@ export function DashboardView({
                 key={timeline.id}
                 timeline={timeline}
                 timeToNextRefresh={timeToNextRefresh}
+                monitoredDays={data.monitoredDays}
                 isCoarsePointer={isCoarsePointer}
                 activeOfficialCardId={activeOfficialCardId}
                 setActiveOfficialCardId={setActiveOfficialCardId}

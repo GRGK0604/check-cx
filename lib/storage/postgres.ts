@@ -180,6 +180,7 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
         "telegram_notification_name",
         "text NOT NULL DEFAULT 'RKAPI模型监控'"
       );
+      await ensureColumnExists(pool, "site_settings", "monitor_started_at", "timestamptz");
       await ensureColumnExists(pool, "telegram_push_records", "notification_key", "text");
       await ensureColumnExists(pool, "telegram_push_records", "event_type", "text");
       await pool.query(
@@ -362,6 +363,20 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
       return mapRows(result.rows).map(mapHistorySnapshotRow);
     } catch (error) {
       wrapError("读取历史快照", error);
+    }
+  }
+
+  async function getEarliestHistoryCheckedAt() {
+    await ensureReady();
+
+    try {
+      const result = await pool.query(
+        `SELECT MIN(checked_at) AS checked_at FROM check_history`
+      );
+      const value = result.rows[0]?.checked_at;
+      return value ? new Date(value).toISOString() : null;
+    } catch (error) {
+      wrapError("读取最早历史记录时间", error);
     }
   }
 
@@ -559,6 +574,7 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
     runtime: {
       history: {
         fetchRows: fetchHistoryRows,
+        getEarliestCheckedAt: getEarliestHistoryCheckedAt,
         append: appendHistory,
         prune: pruneHistory,
         replaceForConfigs: replaceHistoryForConfigs,
@@ -698,7 +714,7 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
               SELECT singleton_key, site_name, site_description, site_icon_url, hero_badge, hero_title_primary,
                      hero_title_secondary, hero_description, footer_brand,
                      admin_console_title, admin_console_description, admin_entry_path,
-                     telegram_notification_name, created_at, updated_at
+                     telegram_notification_name, monitor_started_at, created_at, updated_at
               FROM site_settings
               WHERE singleton_key = $1
               LIMIT 1
@@ -772,6 +788,24 @@ export function createPostgresControlPlaneStorage(connectionString: string): Con
           );
         } catch (error) {
           wrapError("保存站点设置", error);
+        }
+      },
+      async setMonitorStartedAtIfEmpty(singletonKey, startedAt) {
+        await ensureReady();
+        try {
+          const result = await pool.query(
+            `
+              UPDATE site_settings
+              SET monitor_started_at = COALESCE(monitor_started_at, $2::timestamptz)
+              WHERE singleton_key = $1
+              RETURNING monitor_started_at
+            `,
+            [singletonKey, startedAt]
+          );
+          const value = result.rows[0]?.monitor_started_at;
+          return value ? new Date(value).toISOString() : null;
+        } catch (error) {
+          wrapError("保存监控开始时间", error);
         }
       },
     },

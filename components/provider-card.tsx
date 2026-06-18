@@ -15,6 +15,7 @@ import {cn} from "@/lib/utils";
 interface ProviderCardProps {
   timeline: ProviderTimeline;
   timeToNextRefresh: number | null;
+  monitoredDays: number;
   isCoarsePointer: boolean;
   activeOfficialCardId: string | null;
   setActiveOfficialCardId: (id: string | null) => void;
@@ -91,6 +92,7 @@ const CornerPlus = ({ className }: { className?: string }) => (
 export function ProviderCard({
   timeline,
   timeToNextRefresh,
+  monitoredDays,
   isCoarsePointer,
   activeOfficialCardId,
   setActiveOfficialCardId,
@@ -258,7 +260,12 @@ export function ProviderCard({
       </div>
 
       <div className="border-t border-border/20 bg-gradient-to-b from-muted/5 to-muted/20 px-5 py-4 transition-colors duration-500 group-hover:from-muted/10 group-hover:to-muted/30">
-        <StatusTimeline items={items} nextRefreshInMs={timeToNextRefresh} isMaintenance={isMaintenance} />
+        <StatusTimeline
+          items={items}
+          nextRefreshInMs={timeToNextRefresh}
+          isMaintenance={isMaintenance}
+          monitoredDays={monitoredDays}
+        />
       </div>
     </div>
   );

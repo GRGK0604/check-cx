@@ -186,6 +186,7 @@ export interface RuntimeHistoryQueryOptions {
 export interface RuntimeStorage {
   history: {
     fetchRows(options?: RuntimeHistoryQueryOptions): Promise<HistorySnapshotRow[]>;
+    getEarliestCheckedAt(): Promise<string | null>;
     append(results: CheckResult[]): Promise<void>;
     prune(retentionDays: number): Promise<void>;
     replaceForConfigs(input: {
@@ -218,6 +219,7 @@ export interface ControlPlaneStorage {
   siteSettings: {
     getSingleton(singletonKey: string): Promise<SiteSettingsRow | null>;
     upsert(input: SiteSettingsMutationInput): Promise<void>;
+    setMonitorStartedAtIfEmpty(singletonKey: string, startedAt: string): Promise<string | null>;
   };
   checkConfigs: {
     list(input?: {enabledOnly?: boolean}): Promise<StoredCheckConfigRow[]>;

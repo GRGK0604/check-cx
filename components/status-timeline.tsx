@@ -5,7 +5,6 @@ import {Clock} from "lucide-react";
 import {HoverCard, HoverCardContent, HoverCardTrigger} from "@/components/ui/hover-card";
 import {Badge} from "@/components/ui/badge";
 import {ClientTime} from "@/components/client-time";
-import {getStatusDayKey} from "@/lib/core/calendar-day";
 import {STATUS_META} from "@/lib/core/status";
 import type {TimelineItem} from "@/lib/types";
 import {cn} from "@/lib/utils";
@@ -15,6 +14,8 @@ interface StatusTimelineProps {
   items: TimelineItem[];
   /** 距离下一次轮询刷新的剩余毫秒数，用于展示倒计时徽标 */
   nextRefreshInMs?: number | null;
+  /** 全站统一的已检测天数 */
+  monitoredDays: number;
   /** 是否处于维护模式 */
   isMaintenance?: boolean;
 }
@@ -35,31 +36,12 @@ const formatRemainingTime = (ms: number) => {
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
 
-const SUCCESS_STATUSES = new Set(["operational", "degraded"]);
-const COUNTED_STATUSES = new Set([
-  "operational",
-  "degraded",
-  "failed",
-  "validation_failed",
-  "error",
-]);
-
-function getTodayItems(items: TimelineItem[]) {
-  const todayKey = getStatusDayKey(new Date());
-  return items.filter((item) => getStatusDayKey(item.checkedAt) === todayKey);
-}
-
-function getAvailabilityPercentage(items: TimelineItem[]) {
-  const countedItems = items.filter((item) => COUNTED_STATUSES.has(item.status));
-  if (countedItems.length === 0) {
-    return 100;
-  }
-
-  const successCount = countedItems.filter((item) => SUCCESS_STATUSES.has(item.status)).length;
-  return (successCount / countedItems.length) * 100;
-}
-
-export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: StatusTimelineProps) {
+export function StatusTimeline({
+  items,
+  nextRefreshInMs,
+  monitoredDays,
+  isMaintenance,
+}: StatusTimelineProps) {
   const [isCoarsePointer, setIsCoarsePointer] = useState(false);
   const [activeSegmentKey, setActiveSegmentKey] = useState<string | null>(null);
 
@@ -94,11 +76,8 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
     );
   }
 
-  const todayItems = getTodayItems(items);
-  const hasTodayItems = todayItems.length > 0;
-  const displayItems = hasTodayItems ? todayItems.slice(0, SEGMENT_LIMIT) : [];
+  const displayItems = items.slice(0, SEGMENT_LIMIT);
   const segments = Array.from({ length: SEGMENT_LIMIT }, (_, index) => displayItems[index] ?? null);
-  const availabilityPercentage = getAvailabilityPercentage(todayItems);
   const nextRefreshLabel =
     typeof nextRefreshInMs === "number" ? formatRemainingTime(nextRefreshInMs) : null;
 
@@ -107,7 +86,7 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
       {/* Header / Legend */}
       <div className="flex items-center justify-between text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span>成功率 {availabilityPercentage.toFixed(2)}%</span>
+          <span>已检测 {monitoredDays} 天</span>
         </div>
         <div className="flex items-center gap-2">
            {nextRefreshLabel ? (
@@ -131,11 +110,9 @@ export function StatusTimeline({ items, nextRefreshInMs, isMaintenance }: Status
                   key={`placeholder-${index}`}
                   className={cn(
                     "h-full w-[6px] flex-1 rounded-[1px]",
-                    hasTodayItems
-                      ? "border border-dashed border-border/30 bg-muted/10"
-                      : "bg-emerald-500"
+                    "border border-dashed border-border/30 bg-muted/10"
                   )}
-                  aria-label={hasTodayItems ? "暂无记录" : "今日默认正常"}
+                  aria-label="暂无记录"
                 />
               );
             }

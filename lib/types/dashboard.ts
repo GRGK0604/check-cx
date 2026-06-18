@@ -39,6 +39,7 @@ export interface DashboardData {
   pollIntervalLabel: string;
   pollIntervalMs: number;
   trendPeriod: AvailabilityPeriod;
+  monitoredDays: number;
   /**
    * 服务端生成该数据的时间戳（ms）
    * 用于保持倒计时在服务端与客户端渲染时一致

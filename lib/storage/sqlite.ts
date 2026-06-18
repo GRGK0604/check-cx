@@ -202,6 +202,7 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           "telegram_notification_name",
           "text NOT NULL DEFAULT 'RKAPI模型监控'"
         );
+        ensureColumnExists(db, "site_settings", "monitor_started_at", "text");
         ensureColumnExists(db, "telegram_push_records", "notification_key", "text");
         ensureColumnExists(db, "telegram_push_records", "event_type", "text");
         db.prepare(
@@ -381,6 +382,21 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
     }
   }
 
+  async function getEarliestHistoryCheckedAt() {
+    await ensureReady();
+
+    try {
+      const row = db
+        .prepare(`SELECT MIN(checked_at) AS checked_at FROM check_history`)
+        .get() as Record<string, unknown> | undefined;
+      return typeof row?.checked_at === "string" && row.checked_at
+        ? row.checked_at
+        : null;
+    } catch (error) {
+      wrapError("读取最早历史记录时间", error);
+    }
+  }
+
   async function appendHistory(results: Array<{
     id: string;
     status: string;
@@ -556,6 +572,7 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
     runtime: {
       history: {
         fetchRows: fetchHistoryRows,
+        getEarliestCheckedAt: getEarliestHistoryCheckedAt,
         append: appendHistory,
         prune: pruneHistory,
         replaceForConfigs: replaceHistoryForConfigs,
@@ -701,7 +718,7 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
                 SELECT singleton_key, site_name, site_description, site_icon_url, hero_badge, hero_title_primary,
                        hero_title_secondary, hero_description, footer_brand,
                        admin_console_title, admin_console_description, admin_entry_path,
-                       telegram_notification_name, created_at, updated_at
+                       telegram_notification_name, monitor_started_at, created_at, updated_at
                 FROM site_settings
                 WHERE singleton_key = ?
                 LIMIT 1
@@ -773,6 +790,34 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
           );
         } catch (error) {
           wrapError("保存站点设置", error);
+        }
+      },
+      async setMonitorStartedAtIfEmpty(singletonKey, startedAt) {
+        await ensureReady();
+        try {
+          db.prepare(
+            `
+              UPDATE site_settings
+              SET monitor_started_at = COALESCE(monitor_started_at, ?)
+              WHERE singleton_key = ?
+            `
+          ).run(startedAt, singletonKey);
+
+          const row = db
+            .prepare(
+              `
+                SELECT monitor_started_at
+                FROM site_settings
+                WHERE singleton_key = ?
+                LIMIT 1
+              `
+            )
+            .get(singletonKey) as Record<string, unknown> | undefined;
+          return typeof row?.monitor_started_at === "string" && row.monitor_started_at
+            ? row.monitor_started_at
+            : null;
+        } catch (error) {
+          wrapError("保存监控开始时间", error);
         }
       },
     },
