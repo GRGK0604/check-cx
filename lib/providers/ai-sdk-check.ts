@@ -41,7 +41,7 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 /** 文本检测性能降级阈值（毫秒）- 超过此值标记为 degraded 状态 */
 const TEXT_DEGRADED_THRESHOLD_MS = 10_000;
 export const IMAGE_GENERATION_OPERATIONAL_THRESHOLD_MS = 80_000;
-export const IMAGE_GENERATION_TIMEOUT_MS = 90_000;
+export const IMAGE_GENERATION_TIMEOUT_MS = 180_000;
 
 /** 需要从 metadata 中排除的字段，这些字段会与 streamText 内部参数冲突 */
 const EXCLUDED_METADATA_KEYS = new Set(["model", "prompt", "messages", "abortSignal"]);
