@@ -6,6 +6,7 @@ import "server-only";
 
 import {getPollingIntervalMs} from "../core/polling-config";
 import {getControlPlaneStorage} from "@/lib/storage/resolver";
+import {normalizeIds} from "@/lib/storage/shared";
 import type {AvailabilityStats} from "../types/database";
 import type {AvailabilityStat, AvailabilityStatsMap} from "../types";
 import {logError} from "../utils";
@@ -42,14 +43,6 @@ export function resetAvailabilityCacheMetrics(): void {
 export function invalidateAvailabilityCache(): void {
   cache.data = {};
   cache.lastFetchedAt = 0;
-}
-
-function normalizeIds(ids?: Iterable<string> | null): string[] | null {
-  if (!ids) {
-    return null;
-  }
-  const normalized = Array.from(ids).filter(Boolean);
-  return normalized.length > 0 ? normalized : [];
 }
 
 function filterStats(

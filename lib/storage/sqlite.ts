@@ -10,6 +10,7 @@ import {getErrorMessage} from "@/lib/utils";
 import {
   CHECK_HISTORY_STATUS_SQL_LIST,
   CHECK_HISTORY_STATUS_VALUES,
+  chunkRows,
   createStorageId,
   getDefaultRequestTemplateRows,
   getDefaultSiteSettingsRow,
@@ -24,6 +25,7 @@ import {
   mapTelegramAlertStateRow,
   mapTelegramPushConfigRow,
   mapTelegramPushRecordRow,
+  normalizeIds,
   nowIso,
   serializeJson,
   SQLITE_CONTROL_PLANE_SCHEMA_STATEMENTS,
@@ -309,23 +311,6 @@ export function createSqliteControlPlaneStorage(filePath: string): ControlPlaneS
       });
 
     return readyPromise;
-  }
-
-  function normalizeIds(ids?: Iterable<string> | null): string[] | null {
-    if (!ids) {
-      return null;
-    }
-
-    const normalized = Array.from(ids).filter(Boolean);
-    return normalized.length > 0 ? normalized : [];
-  }
-
-  function chunkRows<T>(rows: T[], size: number): T[][] {
-    const chunks: T[][] = [];
-    for (let index = 0; index < rows.length; index += size) {
-      chunks.push(rows.slice(index, index + size));
-    }
-    return chunks;
   }
 
   async function fetchHistoryRows(options?: RuntimeHistoryQueryOptions) {

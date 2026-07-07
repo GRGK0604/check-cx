@@ -488,14 +488,13 @@ function createModel(config: ProviderConfig) {
       return {
         model: isResponses ? provider.responses(modelId) : provider.chat(modelId),
         reasoningEffort,
-        isResponses,
       };
     }
 
     case "anthropic": {
       const provider = createAnthropic({ apiKey: config.apiKey, baseURL, fetch: customFetch });
       // Anthropic 不支持 reasoning_effort
-      return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
+      return { model: provider(modelId), reasoningEffort: undefined };
     }
 
     case "gemini": {
@@ -511,8 +510,6 @@ function createModel(config: ProviderConfig) {
         return {
           model: provider(modelId),
           reasoningEffort: undefined,
-          isResponses: false,
-          isGoogleGenerative: true, // 标记为原生 Gemini
         };
       } else {
         // OpenAI 兼容格式：使用 createOpenAICompatible
@@ -522,7 +519,7 @@ function createModel(config: ProviderConfig) {
           baseURL,
           fetch: customFetch,
         });
-        return { model: provider(modelId), reasoningEffort: undefined, isResponses: false };
+        return { model: provider(modelId), reasoningEffort: undefined };
       }
     }
 

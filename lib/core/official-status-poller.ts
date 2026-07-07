@@ -7,6 +7,7 @@ import type {OfficialStatusResult, ProviderType} from "../types";
 import {checkAllOfficialStatuses} from "../official-status";
 import {getOfficialStatusIntervalMs} from "./polling-config";
 import {logError} from "../utils/error-handler";
+import {isBuildPhase} from "../utils/build-phase";
 
 declare global {
   // 缓存所有 Provider 的最新官方状态
@@ -53,20 +54,6 @@ function setOfficialStatusPolling(polling: boolean): void {
  */
 const officialStatusCache = getOfficialStatusCache();
 
-function isBuildPhase(): boolean {
-  const maybeProcess = Reflect.get(globalThis, "process");
-  if (!maybeProcess || typeof maybeProcess !== "object") {
-    return false;
-  }
-
-  const maybeEnv = Reflect.get(maybeProcess, "env");
-  if (!maybeEnv || typeof maybeEnv !== "object") {
-    return false;
-  }
-
-  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
-}
-
 /**
  * 获取指定 Provider 的官方状态(从缓存)
  * @param type - Provider 类型
@@ -76,16 +63,6 @@ export function getOfficialStatus(
   type: ProviderType
 ): OfficialStatusResult | undefined {
   return officialStatusCache.get(type);
-}
-
-/**
- * 获取所有 Provider 的官方状态缓存
- */
-export function getAllOfficialStatuses(): Map<
-  ProviderType,
-  OfficialStatusResult
-> {
-  return new Map(officialStatusCache);
 }
 
 /**
@@ -161,20 +138,6 @@ export function startOfficialStatusPoller(): void {
     });
   }, intervalMs);
   setOfficialStatusTimer(timer);
-}
-
-/**
- * 停止官方状态轮询器(用于测试或清理)
- */
-export function stopOfficialStatusPoller(): void {
-  const timer = getOfficialStatusTimer();
-  if (!timer) {
-    return;
-  }
-  clearInterval(timer);
-  setOfficialStatusTimer(null);
-  setOfficialStatusPolling(false);
-  console.log("[官方状态] 轮询器已停止");
 }
 
 /**

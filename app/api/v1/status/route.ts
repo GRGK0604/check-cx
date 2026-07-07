@@ -7,6 +7,7 @@ import {
 import { loadProviderConfigsFromDB } from "@/lib/database/config-loader";
 import {getStatusDayKey} from "@/lib/core/calendar-day";
 import { getPollingIntervalMs, getPollingIntervalLabel } from "@/lib/core/polling-config";
+import {COUNTED_STATUSES, SUCCESS_STATUSES} from "@/lib/core/status";
 import type { CheckResult, HealthStatus } from "@/lib/types";
 
 export const revalidate = 0;
@@ -72,15 +73,6 @@ interface ApiResponse {
     };
   };
 }
-
-const SUCCESS_STATUSES: ReadonlySet<HealthStatus> = new Set(["operational", "degraded"]);
-const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
-  "operational",
-  "degraded",
-  "failed",
-  "validation_failed",
-  "error",
-]);
 
 function createPendingLatest(config: {
   name: string;

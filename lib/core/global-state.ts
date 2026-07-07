@@ -30,20 +30,6 @@ export function setPollerTimer(timer: ReturnType<typeof setInterval>): void {
 }
 
 /**
- * 获取轮询器运行状态
- */
-export function isPollerRunning(): boolean {
-  return globalThis.__checkCxPollerRunning ?? false;
-}
-
-/**
- * 设置轮询器运行状态
- */
-export function setPollerRunning(running: boolean): void {
-  globalThis.__checkCxPollerRunning = running;
-}
-
-/**
  * 获取最后一次 Ping 开始时间
  */
 export function getLastPingStartedAt(): number | undefined {

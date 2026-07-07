@@ -58,17 +58,6 @@ function recordMiss(isForced: boolean): void {
   }
 }
 
-export function getFrontendCacheMetrics(): FrontendCacheMetrics {
-  return { ...metrics };
-}
-
-export function resetFrontendCacheMetrics(): void {
-  metrics.hits = 0;
-  metrics.misses = 0;
-  metrics.staleHits = 0;
-  metrics.forcedRefreshes = 0;
-}
-
 /** 缓存存储 */
 const cache = new Map<string, CacheEntry>();
 
@@ -78,10 +67,6 @@ const pendingRequests = new Map<string, Promise<DashboardData | null>>();
 /** 检查缓存是否过期 */
 function isExpired(entry: CacheEntry): boolean {
   return Date.now() - entry.timestamp >= entry.ttlMs;
-}
-
-function isFresh(entry: CacheEntry): boolean {
-  return !isExpired(entry);
 }
 
 /** 获取缓存 */
@@ -117,50 +102,6 @@ export function touchCache(trendPeriod: AvailabilityPeriod): void {
   if (entry) {
     entry.timestamp = Date.now();
   }
-}
-
-/** 清除所有缓存 */
-export function clearCache(): void {
-  cache.clear();
-}
-
-export async function prefetchDashboardData(
-  periods: AvailabilityPeriod[],
-  currentPeriod?: AvailabilityPeriod
-): Promise<void> {
-  const targets = periods.filter((period) => period !== currentPeriod);
-  await Promise.all(
-    targets.map(async (trendPeriod) => {
-      const key = getCacheKey(trendPeriod);
-      const cached = cache.get(key);
-      if (cached && isFresh(cached)) {
-        return;
-      }
-      if (pendingRequests.has(key)) {
-        return;
-      }
-
-      const request = fetchFromNetwork(trendPeriod, cached?.etag, false)
-        .then(({ data, etag }) => {
-          if (data) {
-            setCache(trendPeriod, data, etag);
-          } else if (cached) {
-            touchCache(trendPeriod);
-          }
-          return data;
-        })
-        .catch((error) => {
-          console.error("[check-cx] 预取 dashboard 失败", error);
-          return null;
-        })
-        .finally(() => {
-          pendingRequests.delete(key);
-        });
-
-      pendingRequests.set(key, request);
-      await request;
-    })
-  );
 }
 
 /**

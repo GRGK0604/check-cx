@@ -4,10 +4,9 @@
  */
 
 import type {OfficialHealthStatus, OfficialStatusResult} from "../types";
-import {logError} from "../utils/error-handler";
+import {fetchOfficialStatus} from "./fetch-status";
 
 const ANTHROPIC_STATUS_URL = "https://status.claude.com/api/v2/summary.json";
-const TIMEOUT_MS = 15000; // 15 秒超时
 
 /**
  * Anthropic 状态 API 响应接口
@@ -46,48 +45,11 @@ interface AnthropicSummaryResponse {
  * 检查 Anthropic 官方服务状态
  */
 export async function checkAnthropicStatus(): Promise<OfficialStatusResult> {
-  const checkedAt = new Date().toISOString();
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-    const response = await fetch(ANTHROPIC_STATUS_URL, {
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return {
-        status: "unknown",
-        message: `HTTP ${response.status}`,
-        checkedAt,
-      };
-    }
-
-    const data = (await response.json()) as AnthropicSummaryResponse;
-    return parseAnthropicSummary(data, checkedAt);
-  } catch (error) {
-    logError("checkAnthropicStatus", error);
-
-    if ((error as Error).name === "AbortError") {
-      return {
-        status: "unknown",
-        message: "检查超时",
-        checkedAt,
-      };
-    }
-
-    return {
-      status: "unknown",
-      message: "检查失败",
-      checkedAt,
-    };
-  }
+  return fetchOfficialStatus<AnthropicSummaryResponse>(
+    "checkAnthropicStatus",
+    ANTHROPIC_STATUS_URL,
+    parseAnthropicSummary
+  );
 }
 
 /**

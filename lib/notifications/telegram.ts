@@ -15,6 +15,7 @@ import type {
 } from "@/lib/storage/types";
 import type {CheckResult, HealthStatus} from "@/lib/types";
 import {getErrorMessage} from "@/lib/utils";
+import {isRecordBeforeCurrentFailure, isTimestampAtOrAfter} from "./alert-state-utils";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const TELEGRAM_SEND_TIMEOUT_MS = 20_000;
@@ -132,20 +133,6 @@ function getFailureDurationText(startedAt: string | null, recoveredAt: string): 
   }
 
   return seconds > 0 ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`;
-}
-
-function isTimestampAtOrAfter(value: string | null | undefined, baseline: string | null): boolean {
-  if (!value || !baseline) {
-    return false;
-  }
-
-  const timestamp = Date.parse(value);
-  const baselineTimestamp = Date.parse(baseline);
-  return (
-    Number.isFinite(timestamp) &&
-    Number.isFinite(baselineTimestamp) &&
-    timestamp >= baselineTimestamp
-  );
 }
 
 function hasNotifiedCurrentFailure(state: TelegramAlertStateRecord | null): boolean {
@@ -389,20 +376,6 @@ async function syncAlertStateAfterRetry(
     last_success_at: state.last_success_at ?? now,
     last_notified_at: now,
   });
-}
-
-function isRecordBeforeCurrentFailure(
-  record: TelegramPushRecord,
-  state: TelegramAlertStateRecord
-): boolean {
-  const recordCreatedAt = Date.parse(record.created_at);
-  const failureStartedAt = Date.parse(state.failure_started_at ?? state.last_failure_at ?? "");
-
-  return (
-    Number.isFinite(recordCreatedAt) &&
-    Number.isFinite(failureStartedAt) &&
-    recordCreatedAt < failureStartedAt
-  );
 }
 
 async function assertRetryableTelegramPushRecord(

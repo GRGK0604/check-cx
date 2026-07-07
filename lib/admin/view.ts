@@ -5,7 +5,7 @@ export interface AdminFeedback {
 
 export type AdminSearchParams = Record<string, string | string[] | undefined>;
 
-function getSingleParam(value: string | string[] | undefined): string | null {
+export function getSingleParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) {
     return value[0] ?? null;
   }

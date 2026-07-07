@@ -12,6 +12,7 @@ import {getLastPingStartedAt, getPollerTimer, setLastPingStartedAt, setPollerTim
 import {startOfficialStatusPoller} from "./official-status-poller";
 import type {CheckResult, HealthStatus, ProviderConfig} from "../types";
 import {getProviderCheckAttemptTimeoutMs, PROVIDER_CHECK_MAX_ATTEMPTS} from "../providers";
+import {isBuildPhase} from "../utils/build-phase";
 
 const POLL_INTERVAL_MS = getPollingIntervalMs();
 const FAILURE_STATUSES: ReadonlySet<HealthStatus> = new Set([
@@ -64,20 +65,6 @@ function logFailedResultsByGroup(results: CheckResult[]): void {
   }
 
   console.error("[check-cx] ====================== 批次结束 =====================");
-}
-
-function isBuildPhase(): boolean {
-  const maybeProcess = Reflect.get(globalThis, "process");
-  if (!maybeProcess || typeof maybeProcess !== "object") {
-    return false;
-  }
-
-  const maybeEnv = Reflect.get(maybeProcess, "env");
-  if (!maybeEnv || typeof maybeEnv !== "object") {
-    return false;
-  }
-
-  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
 }
 
 function isRecoveryTickDue(now: number): boolean {

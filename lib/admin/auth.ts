@@ -17,8 +17,6 @@ const scryptAsync = promisify(scryptCallback);
 const ADMIN_SESSION_COOKIE = "check-cx-admin-session";
 const ADMIN_SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
-export type AdminUserRow = AdminUserRecord;
-
 export interface AdminSession {
   userId: string;
   username: string;
@@ -296,7 +294,7 @@ export async function hasAdminUsers(): Promise<boolean> {
   return storage.adminUsers.hasAny();
 }
 
-async function getAdminUserByUsername(username: string): Promise<AdminUserRow | null> {
+async function getAdminUserByUsername(username: string): Promise<AdminUserRecord | null> {
   const normalized = normalizeUsername(username);
   const storage = await getControlPlaneStorage();
   return storage.adminUsers.findByUsername(normalized);

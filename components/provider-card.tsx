@@ -6,10 +6,11 @@ import {ProviderIcon} from "@/components/provider-icon";
 import {StatusTimeline} from "@/components/status-timeline";
 import {Badge} from "@/components/ui/badge";
 import {HoverCard, HoverCardContent, HoverCardTrigger} from "@/components/ui/hover-card";
-import type {HealthStatus, ProviderTimeline, TimelineItem} from "@/lib/types";
+import type {ProviderTimeline, TimelineItem} from "@/lib/types";
 import {getStatusDayKey} from "@/lib/core/calendar-day";
-import {OFFICIAL_STATUS_META, PROVIDER_LABEL, STATUS_META} from "@/lib/core/status";
+import {OFFICIAL_STATUS_META, PROVIDER_LABEL, STATUS_META, COUNTED_STATUSES, SUCCESS_STATUSES} from "@/lib/core/status";
 import {ClientTime} from "@/components/client-time";
+import {CornerPlus} from "@/components/corner-plus";
 import {cn} from "@/lib/utils";
 
 interface ProviderCardProps {
@@ -23,15 +24,6 @@ interface ProviderCardProps {
 
 const formatLatency = (value: number | null | undefined) =>
   typeof value === "number" ? `${value} ms` : "—";
-
-const SUCCESS_STATUSES: ReadonlySet<HealthStatus> = new Set(["operational", "degraded"]);
-const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
-  "operational",
-  "degraded",
-  "failed",
-  "validation_failed",
-  "error",
-]);
 
 const OFFICIAL_STATUS_LABEL: Record<ProviderTimeline["latest"]["type"], string> = {
   openai: "OpenAI官方状态",
@@ -75,19 +67,6 @@ function getAvailabilityTone(percentage: number) {
   }
   return "text-rose-500";
 }
-
-const CornerPlus = ({ className }: { className?: string }) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1"
-    className={cn("absolute h-4 w-4 text-muted-foreground/40", className)}
-  >
-    <line x1="12" y1="0" x2="12" y2="24" />
-    <line x1="0" y1="12" x2="24" y2="12" />
-  </svg>
-);
 
 export function ProviderCard({
   timeline,

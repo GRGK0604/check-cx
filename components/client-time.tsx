@@ -39,22 +39,3 @@ export function ClientTime({ value, placeholder = "", className }: ClientTimePro
 
   return <span className={className}>{formatLocalTime(value)}</span>;
 }
-
-interface ClientYearProps {
-  /** 挂载前显示的占位符 */
-  placeholder?: string;
-}
-
-/**
- * 客户端年份组件
- * 避免服务端和客户端在年末年初时可能的年份差异
- */
-export function ClientYear({ placeholder = "" }: ClientYearProps) {
-  const isMounted = useIsMounted();
-
-  if (!isMounted) {
-    return <>{placeholder}</>;
-  }
-
-  return <>{new Date().getFullYear()}</>;
-}

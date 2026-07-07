@@ -83,17 +83,6 @@ function ensureSingletonRow(): BootstrapRow {
     .get(BOOTSTRAP_SINGLETON_ID) as BootstrapRow;
 }
 
-export function invalidateBootstrapStoreCache(): void {
-  if (bootstrapDbCache) {
-    try {
-      bootstrapDbCache.db.close();
-    } catch {
-    }
-  }
-
-  bootstrapDbCache = null;
-}
-
 export function getBootstrapAdminSessionSecret(): string | null {
   return ensureSingletonRow().admin_session_secret;
 }

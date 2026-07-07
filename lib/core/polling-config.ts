@@ -66,18 +66,6 @@ export function getOfficialStatusIntervalMs() {
   return getOfficialStatusIntervalSeconds() * 1000;
 }
 
-/**
- * 获取官方状态检查间隔的友好显示标签
- */
-export function getOfficialStatusIntervalLabel() {
-  const seconds = getOfficialStatusIntervalSeconds();
-  if (seconds % 60 === 0) {
-    const minutes = seconds / 60;
-    return `${minutes} 分钟`;
-  }
-  return `${seconds} 秒`;
-}
-
 function parseCheckConcurrency() {
   const raw = process.env.CHECK_CONCURRENCY;
   const parsed = Number(raw);

@@ -4,10 +4,9 @@
  */
 
 import type {OfficialHealthStatus, OfficialStatusResult} from "../types";
-import {logError} from "../utils/error-handler";
+import {fetchOfficialStatus} from "./fetch-status";
 
 const OPENAI_STATUS_URL = "https://status.openai.com/proxy/status.openai.com";
-const TIMEOUT_MS = 15000; // 15 秒超时
 
 /**
  * OpenAI 状态 API 响应接口
@@ -38,48 +37,11 @@ interface OpenAIStatusResponse {
  * 检查 OpenAI 官方服务状态
  */
 export async function checkOpenAIStatus(): Promise<OfficialStatusResult> {
-  const checkedAt = new Date().toISOString();
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-    const response = await fetch(OPENAI_STATUS_URL, {
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-      },
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      return {
-        status: "unknown",
-        message: `HTTP ${response.status}`,
-        checkedAt,
-      };
-    }
-
-    const data = (await response.json()) as OpenAIStatusResponse;
-    return parseOpenAIStatus(data, checkedAt);
-  } catch (error) {
-    logError("checkOpenAIStatus", error);
-
-    if ((error as Error).name === "AbortError") {
-      return {
-        status: "unknown",
-        message: "检查超时",
-        checkedAt,
-      };
-    }
-
-    return {
-      status: "unknown",
-      message: "检查失败",
-      checkedAt,
-    };
-  }
+  return fetchOfficialStatus<OpenAIStatusResponse>(
+    "checkOpenAIStatus",
+    OPENAI_STATUS_URL,
+    parseOpenAIStatus
+  );
 }
 
 /**

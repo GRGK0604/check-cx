@@ -13,6 +13,7 @@ import type {
   TelegramPushRecord,
 } from "@/lib/storage/types";
 import {logError} from "@/lib/utils";
+import {isRecordBeforeCurrentFailure, isTimestampAtOrAfter} from "@/lib/notifications/alert-state-utils";
 
 export const ADMIN_PROVIDER_TYPES = ["openai", "anthropic", "gemini"] as const;
 export type AdminProviderType = (typeof ADMIN_PROVIDER_TYPES)[number];
@@ -61,34 +62,6 @@ export interface AdminTelegramPushData {
   records: TelegramPushRecord[];
   retryableRecordIds: string[];
   detail: TelegramPushRecord | null;
-}
-
-function isTimestampAtOrAfter(value: string | null | undefined, baseline: string | null): boolean {
-  if (!value || !baseline) {
-    return false;
-  }
-
-  const timestamp = Date.parse(value);
-  const baselineTimestamp = Date.parse(baseline);
-  return (
-    Number.isFinite(timestamp) &&
-    Number.isFinite(baselineTimestamp) &&
-    timestamp >= baselineTimestamp
-  );
-}
-
-function isRecordBeforeCurrentFailure(
-  record: TelegramPushRecord,
-  state: TelegramAlertStateRecord
-): boolean {
-  const recordCreatedAt = Date.parse(record.created_at);
-  const failureStartedAt = Date.parse(state.failure_started_at ?? state.last_failure_at ?? "");
-
-  return (
-    Number.isFinite(recordCreatedAt) &&
-    Number.isFinite(failureStartedAt) &&
-    recordCreatedAt < failureStartedAt
-  );
 }
 
 async function loadConfigs(): Promise<AdminCheckConfigRow[]> {

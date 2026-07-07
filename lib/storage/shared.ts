@@ -369,6 +369,23 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function normalizeIds(ids?: Iterable<string> | null): string[] | null {
+  if (!ids) {
+    return null;
+  }
+
+  const normalized = Array.from(ids).filter(Boolean);
+  return normalized.length > 0 ? normalized : [];
+}
+
+export function chunkRows<T>(rows: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size));
+  }
+  return chunks;
+}
+
 export function serializeJson(value: Record<string, unknown> | null | undefined): string | null {
   if (!value) {
     return null;

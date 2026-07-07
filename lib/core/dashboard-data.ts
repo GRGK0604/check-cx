@@ -15,6 +15,7 @@ import {getPollingIntervalLabel, getPollingIntervalMs} from "./polling-config";
 import {ensureOfficialStatusPoller} from "./official-status-poller";
 import {ensureCheckPoller} from "./poller";
 import {buildProviderTimelines, loadSnapshotForScope} from "./health-snapshot-service";
+import {isBuildPhase} from "../utils/build-phase";
 import type {AvailabilityPeriod, DashboardData, RefreshMode} from "../types";
 
 interface DashboardCacheEntry {
@@ -83,20 +84,6 @@ function buildDashboardEtag(data: DashboardData): string {
   void generatedAt;
   const jsonBody = JSON.stringify(etagPayload);
   return generateETag(jsonBody);
-}
-
-function isBuildPhase(): boolean {
-  const maybeProcess = Reflect.get(globalThis, "process");
-  if (!maybeProcess || typeof maybeProcess !== "object") {
-    return false;
-  }
-
-  const maybeEnv = Reflect.get(maybeProcess, "env");
-  if (!maybeEnv || typeof maybeEnv !== "object") {
-    return false;
-  }
-
-  return Reflect.get(maybeEnv, "NEXT_PHASE") === "phase-production-build";
 }
 
 function getEmptyDashboardData(trendPeriod: AvailabilityPeriod): DashboardLoadResult {

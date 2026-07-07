@@ -1,9 +1,10 @@
 "use client";
 
 import {useCallback, useEffect, useMemo, useRef, useState} from "react";
-import {Activity, ExternalLink, RefreshCcw} from "lucide-react";
+import {Activity, RefreshCcw} from "lucide-react";
 
 import {ClientTime} from "@/components/client-time";
+import {CornerPlus} from "@/components/corner-plus";
 import {ProviderCard} from "@/components/provider-card";
 import {ThemeToggle} from "@/components/theme-toggle";
 import {fetchWithCache, setCache} from "@/lib/core/frontend-cache";
@@ -19,12 +20,6 @@ interface DashboardViewProps {
 
 const DEFAULT_PERIOD: AvailabilityPeriod = "7d";
 const AUTO_SYNC_RETRY_MS = 5_000;
-
-const OFFICIAL_STATUS_LINKS = [
-  {label: "OpenAI 官方状态页", href: "https://status.openai.com/"},
-  {label: "Claude 官方状态页", href: "https://status.claude.com/"},
-  {label: "Gemini 官方状态页", href: "https://aistudio.google.com/status"},
-];
 
 function getLatestCheckTimestamp(timelines: DashboardData["providerTimelines"]) {
   const timestamps = timelines
@@ -49,19 +44,6 @@ function computeRemainingMs(
 
   return Math.max(0, pollIntervalMs - (clock - latestCheckTimestamp));
 }
-
-const CornerPlus = ({className}: {className?: string}) => (
-  <svg
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1"
-    className={cn("absolute h-4 w-4 text-muted-foreground/40", className)}
-  >
-    <line x1="12" y1="0" x2="12" y2="24" />
-    <line x1="0" y1="12" x2="24" y2="12" />
-  </svg>
-);
 
 export function DashboardView({
   initialData,
@@ -229,21 +211,6 @@ export function DashboardView({
               {siteSettings.siteName}
             </h1>
             <ThemeToggle />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
-            {OFFICIAL_STATUS_LINKS.map((link) => (
-              <a
-                key={link.href}
-                href={link.href}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/50 px-3 py-1.5 transition-colors hover:border-border/80 hover:text-foreground"
-              >
-                {link.label}
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            ))}
           </div>
         </div>
 

@@ -1,5 +1,20 @@
 import type {HealthStatus, OfficialHealthStatus, ProviderType} from "../types";
 
+/** 计入可用率分母的状态（有效检查结果） */
+export const COUNTED_STATUSES: ReadonlySet<HealthStatus> = new Set([
+  "operational",
+  "degraded",
+  "failed",
+  "validation_failed",
+  "error",
+]);
+
+/** 视为成功（计入可用率分子）的状态 */
+export const SUCCESS_STATUSES: ReadonlySet<HealthStatus> = new Set([
+  "operational",
+  "degraded",
+]);
+
 export const STATUS_META: Record<
   HealthStatus,
   {

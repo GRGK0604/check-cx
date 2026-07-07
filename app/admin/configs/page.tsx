@@ -23,21 +23,13 @@ import {deleteConfigAction, manageConfigsAction, upsertConfigAction} from "@/app
 import {requireAdminSession} from "@/lib/admin/auth";
 import {ADMIN_PROVIDER_TYPES, loadAdminConfigData} from "@/lib/admin/data";
 import {getAdminPath} from "@/lib/admin/paths";
-import {formatAdminTimestamp, formatJson, getAdminFeedback} from "@/lib/admin/view";
+import {formatAdminTimestamp, formatJson, getAdminFeedback, getSingleParam} from "@/lib/admin/view";
 
 export const dynamic = "force-dynamic";
 
 interface AdminConfigsPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
   adminBasePath?: string;
-}
-
-function getSingleParam(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-
-  return value ?? null;
 }
 
 const CONFIGS_BATCH_FORM_ID = "admin-configs-batch-form";
